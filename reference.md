@@ -28,13 +28,13 @@ export const simpleThread = defineFeature(function(context is Context, id is Id,
     precondition
     {
         annotation { "Name" : "Major Diameter" }
-        isLength(definition.majorDia, LENGTH_BOUNDS);
+        isLength(definition.majorDia, { (millimeter) : [1, 10, 100] } as LengthBoundSpec);
 
         annotation { "Name" : "Pitch" }
-        isLength(definition.pitch, LENGTH_BOUNDS);
+        isLength(definition.pitch, { (millimeter) : [0.1, 1.5, 10] } as LengthBoundSpec);
 
         annotation { "Name" : "Length" }
-        isLength(definition.length, LENGTH_BOUNDS);
+        isLength(definition.length, { (millimeter) : [1, 20, 200] } as LengthBoundSpec);
     }
     {
         var minorDia = definition.majorDia - 1.0825 * definition.pitch;
@@ -119,13 +119,13 @@ export const laptopHinge = defineFeature(function(context is Context, id is Id, 
     precondition
     {
         annotation { "Name" : "Hinge Diameter" }
-        isLength(definition.hingeDia, LENGTH_BOUNDS);
+        isLength(definition.hingeDia, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Hinge Length" }
-        isLength(definition.hingeLength, LENGTH_BOUNDS);
+        isLength(definition.hingeLength, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Wall Thickness" }
-        isLength(definition.wallThickness, LENGTH_BOUNDS);
+        isLength(definition.wallThickness, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
     }
     {
         // Outer cylinder
@@ -165,16 +165,16 @@ export const keycap = defineFeature(function(context is Context, id is Id, defin
     precondition
     {
         annotation { "Name" : "Key Width" }
-        isLength(definition.keyWidth, LENGTH_BOUNDS);
+        isLength(definition.keyWidth, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Key Height" }
-        isLength(definition.keyHeight, LENGTH_BOUNDS);
+        isLength(definition.keyHeight, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Key Depth" }
-        isLength(definition.keyDepth, LENGTH_BOUNDS);
+        isLength(definition.keyDepth, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Top Radius" }
-        isLength(definition.topRadius, LENGTH_BOUNDS);
+        isLength(definition.topRadius, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
     }
     {
         // Bottom profile
@@ -228,19 +228,19 @@ export const speakerGrill = defineFeature(function(context is Context, id is Id,
     precondition
     {
         annotation { "Name" : "Grill Width" }
-        isLength(definition.grillWidth, LENGTH_BOUNDS);
+        isLength(definition.grillWidth, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Grill Height" }
-        isLength(definition.grillHeight, LENGTH_BOUNDS);
+        isLength(definition.grillHeight, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Hole Diameter" }
-        isLength(definition.holeDia, LENGTH_BOUNDS);
+        isLength(definition.holeDia, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Hole Spacing" }
-        isLength(definition.spacing, LENGTH_BOUNDS);
+        isLength(definition.spacing, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
 
         annotation { "Name" : "Plate Thickness" }
-        isLength(definition.thickness, LENGTH_BOUNDS);
+        isLength(definition.thickness, { (millimeter) : [0, 10, 500] } as LengthBoundSpec);
     }
     {
         // Create base plate
