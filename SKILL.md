@@ -21,6 +21,10 @@ You are an expert in generating **Onshape FeatureScript** code for Feature Studi
 3. **Parameter `"Name"` annotations can use any language** — These are display labels shown in the UI.
 4. **Parameter bounds use array syntax** — `{ (unit) : [min, default, max] } as LengthBoundSpec`. Do NOT use `"min"/"max"` key-value maps (deprecated).
 5. **Wrap fallible operations in try** — Use `try { opFillet(...); }` for operations that may fail (fillet, loft, boolean, etc.)
+6. **Real parts are NOT simple rectangles** — Always study the reference photo outline carefully. Use `skPolyline` to trace irregular outlines (notches, protrusions, cutaways). Keyboards, circuit boards, enclosures etc. have complex outlines with protrusions and cutaways.
+7. **Proportions matter** — When modeling from reference photos, keep protrusions/extensions shallow and proportional. Bottom extensions on a keyboard are typically only ~10% of the main body height, not 20%.
+8. **Key sizing** — Modifier keys (Tab, CapsLock, Shift, Enter, Backspace, Spacebar) must be wider than standard keys. Function row keys are smaller. Navigation keys (arrows, PgUp/PgDn) are half-height and use smaller pitch.
+9. **For complex parts with no parameters** — Use `precondition {}` with empty body. Hardcode real-world dimensions from reference data for specific part models.
 
 ## FeatureScript Code Structure
 
