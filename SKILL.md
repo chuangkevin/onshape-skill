@@ -11,8 +11,53 @@ You are an expert in generating **Onshape FeatureScript** code for Feature Studi
 
 ## Input Processing
 
-1. **If given an image path**: Read and analyze the image to understand the geometry, dimensions, and features
+1. **If given an image path**: Follow the **Reference Photo Analysis** procedure below
 2. **If given a description**: Parse the requirements and create appropriate 3D geometry
+
+## Reference Photo Analysis
+
+When working from reference photos, follow this systematic process BEFORE writing any code:
+
+### Step 1: Identify Scale Reference
+- Look for rulers, calipers, tape measures, or known-size objects in the photo
+- Note the unit (mm, cm, inch) and readable markings
+- Establish a **pixels-per-mm ratio** mentally: find two readable marks on the ruler and estimate how many pixels span that distance
+- If no scale reference exists, ask the user for at least ONE known dimension
+
+### Step 2: Extract Overall Outline (MOST IMPORTANT)
+- **Trace the silhouette** of the part — ignore internal features first
+- Identify the basic shape: rectangle? L-shape? T-shape? Irregular polygon?
+- Mark all **concave notches** and **convex protrusions** along the edge
+- For each edge segment, estimate its length using the scale reference
+- Calculate the **aspect ratio** (width:height) — this is the single most important check
+
+### Step 3: Measure Key Dimensions
+Using the scale reference, extract these in order of importance:
+1. **Overall bounding box**: total width × total height
+2. **Major feature positions**: where do protrusions/notches start and end?
+3. **Margins/bezels**: distance from edge to nearest feature
+4. **Protrusion depths**: how far do extensions stick out relative to the main body?
+5. **Internal feature spacing**: pitch, gaps between repeated elements
+
+### Step 4: Cross-Reference Multiple Photos
+If multiple photos are provided:
+- **Top/front view**: extract width, height, outline shape
+- **Side view**: extract thickness/depth
+- **Close-up with caliper**: extract precise local measurements
+- **Verify consistency**: dimensions from different photos should agree
+
+### Step 5: Proportion Sanity Check
+Before coding, verify these ratios match the photos:
+- Main body aspect ratio (width ÷ height)
+- Protrusion depth ÷ main body height (typically 5-15% for small extensions)
+- Margin/bezel width ÷ total width (typically 1-5%)
+- Feature spacing regularity (are repeated elements evenly spaced?)
+
+### Common Pitfalls
+- **Ignoring bezels**: Real parts have edge margins around features — don't place features flush to the edge
+- **Symmetric assumptions**: Many parts are NOT symmetric — check each edge independently
+- **Extension proportions**: Protrusions below a main body are usually much shallower than they appear at first glance
+- **Right-angle bias**: Not every outline is made of right angles — look for chamfers, curves, tapers
 
 ## IMPORTANT Rules
 
@@ -279,9 +324,10 @@ export const roundedBox = defineFeature(function(context is Context, id is Id, d
 
 ## Workflow
 
-1. Analyze the input (image or description)
-2. Identify key geometric features and dimensions
-3. Plan the modeling approach (sketch + extrude, revolve, loft, etc.)
-4. Generate complete FeatureScript code
-5. Add Chinese comments if user speaks Chinese
-6. Output code in a code block ready for Feature Studio
+1. **Read ALL reference images** using the Read tool (they are visual — Claude is multimodal)
+2. **Run the Reference Photo Analysis** (Steps 1-5 above) — write down extracted dimensions before coding
+3. **Report findings to user**: state the outline shape, key dimensions, and aspect ratio you measured
+4. Plan the modeling approach (sketch + extrude, revolve, loft, etc.)
+5. **Code the outline FIRST** — get the silhouette right before adding internal details
+6. Generate complete FeatureScript code with comments in user's language
+7. Output code in a code block ready for Feature Studio
