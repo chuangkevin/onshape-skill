@@ -15,13 +15,13 @@
 
 ## 3. Gemini Key Pool
 
-- [ ] 3.1 Implement geminiKeys.ts: multi-source key loading (ENV + DB), deduplication
-- [ ] 3.2 Implement round-robin rotation (getGeminiApiKey)
-- [ ] 3.3 Implement 429 failover (getGeminiApiKeyExcluding)
-- [ ] 3.4 Implement usage tracking (trackUsage → api_key_usage table)
-- [ ] 3.5 Implement key CRUD (addApiKey, removeApiKey, getKeyList with stats)
-- [ ] 3.6 Implement 60s cache with invalidateKeyCache()
-- [ ] 3.7 Test: unit tests for rotation, failover, caching, usage tracking
+- [x] 3.1 Implement geminiKeys.ts: multi-source key loading (ENV + DB), deduplication
+- [x] 3.2 Implement round-robin rotation (getGeminiApiKey)
+- [x] 3.3 Implement 429 failover (getGeminiApiKeyExcluding)
+- [x] 3.4 Implement usage tracking (trackUsage → api_key_usage table)
+- [x] 3.5 Implement key CRUD (addApiKey, removeApiKey, getKeyList with stats)
+- [x] 3.6 Implement 60s cache with invalidateKeyCache()
+- [x] 3.7 Test: unit tests for rotation, failover, caching, usage tracking
 
 ## 4. Express Server & API Routes
 
