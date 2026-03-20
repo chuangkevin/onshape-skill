@@ -1,7 +1,7 @@
 import { PhotoLayer } from './canvas/PhotoLayer.js';
 import { DrawingLayer } from './canvas/DrawingLayer.js';
 import { store, type ToolType, type PhotoState } from './state/store.js';
-import { activatePolylineTool } from './tools/PolylineTool.js';
+import { activatePolylineTool, isDrawingInProgress } from './tools/PolylineTool.js';
 import { activateArcTool } from './tools/ArcTool.js';
 import { activateScaleTool } from './tools/ScaleTool.js';
 import { activateHoleTool } from './tools/HoleTool.js';
@@ -56,8 +56,17 @@ store.subscribe(() => {
 
 // ── Tool Management ──
 let cleanupTool: (() => void) | null = null;
+let hasUnsavedDrawing = false; // Track if user is mid-drawing
 
-function activateTool(tool: ToolType): void {
+function setUnsavedDrawing(v: boolean): void { hasUnsavedDrawing = v; }
+
+function activateTool(tool: ToolType, force = false): void {
+  // Confirm if user has unsaved in-progress drawing
+  if (!force && (hasUnsavedDrawing || isDrawingInProgress)) {
+    if (!confirm('目前有未完成的繪製，確定要切換工具嗎？')) return;
+  }
+  hasUnsavedDrawing = false;
+
   if (cleanupTool) cleanupTool();
 
   switch (tool) {
@@ -65,21 +74,27 @@ function activateTool(tool: ToolType): void {
       cleanupTool = activateSelectTool(drawingCanvas, photoLayer, renderDrawings);
       break;
     case 'polyline':
-      cleanupTool = activatePolylineTool(drawingCanvas, photoLayer, drawingLayer, renderDrawings);
+      cleanupTool = activatePolylineTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);
       break;
     case 'arc':
-      cleanupTool = activateArcTool(drawingCanvas, photoLayer, drawingLayer, renderDrawings);
+      cleanupTool = activateArcTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);
       break;
     case 'hole':
-      cleanupTool = activateHoleTool(drawingCanvas, photoLayer, drawingLayer, renderDrawings);
+      cleanupTool = activateHoleTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);
       break;
     case 'scale':
-      cleanupTool = activateScaleTool(drawingCanvas, photoLayer, drawingLayer, renderDrawings);
+      cleanupTool = activateScaleTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);
       break;
   }
 
   store.setActiveTool(tool);
   showToolHint(tool);
+}
+
+/** Wrapper that also updates guide after drawing changes */
+function renderDrawingsAndTrack(): void {
+  renderDrawings();
+  renderUI();
 }
 
 let hintTimer: ReturnType<typeof setTimeout> | null = null;
@@ -154,12 +169,53 @@ function autoAdvance(): void {
   const photo = store.getActivePhoto();
   const currentTool = store.getState().activeTool;
 
-  // After scale calibration → switch to polyline
+  // After scale calibration → auto-detect contour then switch to polyline
   if (step === 3 && currentTool === 'scale' && photo?.scale) {
-    setTimeout(() => {
-      activateTool('polyline');
+    setTimeout(async () => {
+      showToolHint('scale'); // Update hint
+      toolHint.textContent = '比例尺已校準！正在自動偵測輪廓...';
+      toolHint.classList.remove('hidden');
+
+      // Try auto-contour detection
+      await tryAutoContour();
+
+      activateTool('polyline', true);
       renderUI();
     }, 300);
+  }
+}
+
+/** Try to auto-detect contour using OpenCV and add as initial drawing */
+async function tryAutoContour(): Promise<void> {
+  const state = store.getState();
+  const photo = store.getActivePhoto();
+  if (!state.projectId || !photo) return;
+
+  try {
+    const result = await api.autoContour(state.projectId, photo.id);
+
+    if (result.contours && result.contours.length > 0) {
+      // Take the largest contour
+      const largest = result.contours[0];
+      if (largest.contour_px && largest.contour_px.length >= 3) {
+        const shape = {
+          type: 'polyline' as const,
+          id: `auto_${Date.now()}`,
+          points_px: largest.contour_px,
+          closed: true,
+        };
+        store.addDrawing(shape);
+        toolHint.textContent = `自動偵測到輪廓（${largest.contour_px.length} 點），可用選取工具微調`;
+        renderDrawings();
+        return;
+      }
+    }
+
+    // No contour found
+    toolHint.textContent = '未偵測到輪廓，請手動描繪邊緣';
+  } catch (err) {
+    console.warn('Auto-contour failed:', err);
+    toolHint.textContent = '自動偵測失敗，請手動描繪邊緣';
   }
 }
 
@@ -427,12 +483,20 @@ function setupEvents(): void {
   document.getElementById('analyzeBtn')!.addEventListener('click', async () => {
     const projectId = store.getState().projectId;
     if (!projectId) return alert('請先建立專案');
+
+    const btn = document.getElementById('analyzeBtn') as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = 'AI 分析中...';
     showAnalysisLoading();
+
     try {
       const result = await api.analyzeProject(projectId);
       showAnalysisResult(result);
     } catch (err: any) {
       showAnalysisError(err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'AI 分析';
     }
   });
 

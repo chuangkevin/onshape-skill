@@ -65,6 +65,13 @@ export const updatePhoto = (projectId: number, photoId: number, data: Record<str
 export const deletePhoto = (projectId: number, photoId: number) =>
   apiFetch<{ deleted: boolean }>(`/api/projects/${projectId}/photos/${photoId}`, { method: 'DELETE' });
 
+// Auto contour detection
+export const autoContour = (projectId: number, photoId: number, roi?: any) =>
+  apiFetch<any>(`/api/projects/${projectId}/photos/${photoId}/auto-contour`, {
+    method: 'POST',
+    body: JSON.stringify({ roi }),
+  });
+
 // Analysis
 export const analyzeProject = (projectId: number) =>
   apiFetch<any>(`/api/projects/${projectId}/analyze`, { method: 'POST' });

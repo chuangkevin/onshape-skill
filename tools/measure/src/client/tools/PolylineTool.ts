@@ -3,6 +3,9 @@ import type { PhotoLayer } from '../canvas/PhotoLayer.js';
 import type { DrawingLayer } from '../canvas/DrawingLayer.js';
 import { store } from '../state/store.js';
 
+// Exposed so main.ts can check if user is mid-drawing
+export let isDrawingInProgress = false;
+
 let points: Point[] = [];
 let idCounter = 0;
 let lastClickTime = 0;
@@ -25,12 +28,12 @@ export function activatePolylineTool(
     if (now - lastClickTime < 300) return;
     lastClickTime = now;
 
-    // Use setTimeout to allow dblclick to cancel
     setTimeout(() => {
       const rect = drawingCanvas.getBoundingClientRect();
       const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       const imgPt = photoLayer.screenToImage(screenPt.x, screenPt.y);
       points.push(imgPt);
+      isDrawingInProgress = points.length > 0;
       drawingLayer.setActivePoints([...points]);
       renderFn();
     }, 50);
@@ -82,6 +85,7 @@ export function activatePolylineTool(
     drawingCanvas.removeEventListener('dblclick', onDblClick);
     window.removeEventListener('keydown', onKeyDown);
     points = [];
+    isDrawingInProgress = false;
     drawingLayer.clearActive();
   };
 }

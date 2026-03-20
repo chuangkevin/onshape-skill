@@ -1,6 +1,9 @@
 import { Router } from 'express';
+import { resolve } from 'path';
 import { getDb } from '../db.js';
 import { runAnalysisPipeline } from '../services/analyze.js';
+import { detectEdges } from '../services/opencv.js';
+import { UPLOAD_DIR } from './photos.js';
 
 const router = Router();
 
@@ -30,10 +33,35 @@ router.post('/:id/analyze', async (req, res) => {
       result,
     });
   } catch (err: any) {
+    console.error('Analysis pipeline error:', err);
     res.status(500).json({
       status: 'error',
       error: err.message || 'Analysis failed',
     });
+  }
+});
+
+// POST /api/projects/:projectId/photos/:photoId/auto-contour
+router.post('/:projectId/photos/:photoId/auto-contour', async (req, res) => {
+  const db = getDb();
+  const photo: any = db.prepare(
+    'SELECT * FROM photos WHERE id = ? AND project_id = ?'
+  ).get(req.params.photoId, req.params.projectId);
+
+  if (!photo) {
+    res.status(404).json({ error: 'Photo not found' });
+    return;
+  }
+
+  const imagePath = resolve(UPLOAD_DIR, photo.filename);
+  const roi = req.body.roi; // optional
+
+  try {
+    const result = await detectEdges(imagePath, roi, 0.003);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Auto-contour error:', err);
+    res.status(500).json({ error: err.message, contours: [], circles: [] });
   }
 });
 
