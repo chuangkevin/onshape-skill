@@ -154,7 +154,7 @@ function fuseCaliperReadings(
   const readings: CaliperReading[] = [];
 
   // From AI OCR
-  for (const ocr of aiResults.ocr_readings) {
+  for (const ocr of (aiResults.ocr_readings || [])) {
     readings.push({
       location: ocr.location,
       value_mm: ocr.unit === 'mm' ? ocr.value
