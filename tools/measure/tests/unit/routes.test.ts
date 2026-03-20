@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import Database from 'better-sqlite3';
@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Mock db module - create in-memory DB and override getDb
-import { createTestDb } from '../../src/server/db.js';
+import { createTestDb, getDb } from '../../src/server/db.js';
 
 let db: Database.Database;
 let app: express.Express;
@@ -20,6 +20,11 @@ let app: express.Express;
 // We'll test the API contract via the full app import approach
 
 describe('API Routes', () => {
+  afterAll(() => {
+    const db = getDb();
+    db.prepare("DELETE FROM projects WHERE name IN ('Test Project', 'Listed Project', 'To Delete')").run();
+  });
+
   beforeEach(async () => {
     // Create a fresh express app for each test
     app = express();

@@ -150,4 +150,11 @@ const MIGRATIONS = [
         ('gemini_model', 'gemini-2.5-flash');
     `,
   },
+  {
+    name: '003_cleanup_test_data',
+    sql: `
+      DELETE FROM photos WHERE project_id IN (SELECT id FROM projects WHERE name IN ('Test Project', 'Listed Project'));
+      DELETE FROM projects WHERE name IN ('Test Project', 'Listed Project');
+    `,
+  },
 ];

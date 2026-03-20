@@ -29,6 +29,13 @@ const projectNameEl = document.getElementById('projectName') as HTMLSpanElement;
 const toolHint = document.getElementById('toolHint') as HTMLDivElement;
 const analysisResults = document.getElementById('analysisResults') as HTMLDivElement;
 
+// ── Landing Page DOM Elements ──
+const projectLanding = document.getElementById('projectLanding') as HTMLDivElement;
+const projectGrid = document.getElementById('projectGrid') as HTMLDivElement;
+const newProjectBtn = document.getElementById('newProjectBtn') as HTMLButtonElement;
+const backToLanding = document.getElementById('backToLanding') as HTMLButtonElement;
+const sidebarProjectName = document.getElementById('sidebarProjectName') as HTMLSpanElement;
+
 // ── Mode & Wizard DOM Elements ──
 const modeSelector = document.getElementById('modeSelector') as HTMLDivElement;
 const modeToggleBtn = document.getElementById('modeToggle') as HTMLButtonElement;
@@ -334,12 +341,92 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
   };
 }
 
+// ── Landing Page Logic ──
+async function showLanding(): Promise<void> {
+  projectLanding.classList.remove('hidden');
+  // Hide workspace elements
+  const mainEl = document.querySelector('.main') as HTMLElement;
+  if (mainEl) mainEl.style.display = 'none';
+
+  // Fetch and render project list
+  const projects = await api.listProjects();
+
+  if (projects.length === 0) {
+    projectGrid.innerHTML = '<p style="text-align:center;color:#8b949e;grid-column:1/-1;">尚無專案，點擊上方「+ 新建專案」開始</p>';
+    return;
+  }
+
+  projectGrid.innerHTML = projects.map(p => `
+    <div class="project-card" data-project-id="${p.id}">
+      <h3>${p.name}</h3>
+      <div class="card-meta">${new Date(p.created_at).toLocaleDateString('zh-TW')}</div>
+      <div class="card-actions">
+        <button type="button" class="card-btn" data-action="open" data-id="${p.id}">開啟</button>
+        <button type="button" class="card-btn danger" data-action="delete" data-id="${p.id}">刪除</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function openProject(projectId: number): Promise<void> {
+  const projects = await api.listProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return;
+
+  store.setProject(project.id, project.name);
+
+  const photos = await api.listPhotos(project.id);
+  if (photos.length > 0) {
+    store.setPhotos(photos.map(p => ({
+      id: p.id, filename: p.filename, originalName: p.original_name,
+      angle: (p.angle || 'top') as ViewAngle,
+      scale: p.scale_data ? JSON.parse(p.scale_data) : null,
+      drawings: [], features: [], dimensions: [],
+    })));
+    await loadPhoto(store.getActivePhoto()!);
+  } else {
+    store.setPhotos([]);
+  }
+
+  // Hide landing, show workspace
+  projectLanding.classList.add('hidden');
+  const mainEl = document.querySelector('.main') as HTMLElement;
+  if (mainEl) mainEl.style.display = '';
+
+  sidebarProjectName.textContent = project.name;
+  renderUI();
+
+  // Apply saved mode or show mode selector
+  const savedMode = localStorage.getItem('measureMode') as 'wizard' | 'free' | null;
+  if (savedMode) {
+    applyMode(savedMode);
+    // Set wizard step based on current state (for returning users)
+    if (savedMode === 'wizard') {
+      const photo = store.getActivePhoto();
+      if (!store.getState().photos.length) wizardStep = 1;
+      else if (!photo?.scale) wizardStep = 2;
+      else if (!photo.drawings.length) wizardStep = 3;
+      else wizardStep = 4;
+      updateWizard();
+    }
+  } else {
+    showModeSelector();
+  }
+}
+
+function hideLanding(): void {
+  projectLanding.classList.add('hidden');
+  const mainEl = document.querySelector('.main') as HTMLElement;
+  if (mainEl) mainEl.style.display = '';
+}
+
 function renderUI(): void {
   const state = store.getState();
   const photo = store.getActivePhoto();
 
   // Project name
   projectNameEl.textContent = state.projectName || '尚無專案';
+  sidebarProjectName.textContent = state.projectName || '';
 
   // Tool buttons
   document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {
@@ -664,6 +751,43 @@ function setupEvents(): void {
 
   // Window resize
   window.addEventListener('resize', resizeCanvases);
+
+  // ── Landing Page Events ──
+  // New project button
+  newProjectBtn.addEventListener('click', async () => {
+    const name = prompt('請輸入專案名稱：');
+    if (!name) return;
+    const project = await api.createProject(name);
+    await openProject(project.id);
+  });
+
+  // Project grid clicks (event delegation)
+  projectGrid.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest('[data-action]') as HTMLElement;
+    if (!btn) {
+      // Click on card itself
+      const card = (e.target as HTMLElement).closest('.project-card') as HTMLElement;
+      if (card) await openProject(parseInt(card.dataset.projectId!));
+      return;
+    }
+
+    const action = btn.dataset.action;
+    const id = parseInt(btn.dataset.id!);
+
+    if (action === 'open') {
+      await openProject(id);
+    } else if (action === 'delete') {
+      if (confirm('確定要刪除此專案？所有照片和資料將被永久刪除。')) {
+        await api.deleteProject(id);
+        await showLanding(); // Refresh list
+      }
+    }
+  });
+
+  // Back to landing
+  backToLanding.addEventListener('click', () => {
+    showLanding();
+  });
 }
 
 // ── Mode Selector Logic ──
@@ -924,50 +1048,11 @@ async function init(): Promise<void> {
   activateTool('select');
   renderUI();
 
-  // Check saved mode preference
-  const savedMode = localStorage.getItem('measureMode') as 'wizard' | 'free' | null;
-  if (savedMode) {
-    applyMode(savedMode);
-  } else {
-    showModeSelector();
-  }
-
-  // Load existing project (skip garbled names)
-  const projects = await api.listProjects();
-  const validProject = projects.find((p) => {
-    // Skip projects with garbled names (non-printable characters)
-    return p.name && !/[\uFFFD]/.test(p.name) && p.name.length > 0;
-  });
-
-  if (validProject) {
-    store.setProject(validProject.id, validProject.name);
-    const photos = await api.listPhotos(validProject.id);
-    if (photos.length > 0) {
-      store.setPhotos(
-        photos.map((p) => ({
-          id: p.id, filename: p.filename, originalName: p.original_name,
-          angle: (p.angle || 'top') as ViewAngle,
-          scale: p.scale_data ? JSON.parse(p.scale_data) : null,
-          drawings: [], features: [], dimensions: [],
-        })),
-      );
-      await loadPhoto(store.getActivePhoto()!);
-    }
-    renderUI();
-  }
+  // Show project landing page
+  await showLanding();
 
   // Now wizard is ready to auto-advance from user actions (not init data)
   wizardReady = true;
-
-  // Set wizard step based on current state (for returning users)
-  if (currentMode === 'wizard') {
-    const photo = store.getActivePhoto();
-    if (!store.getState().photos.length) wizardStep = 1;
-    else if (!photo?.scale) wizardStep = 2;
-    else if (!photo.drawings.length) wizardStep = 3;
-    else wizardStep = 4;
-    updateWizard();
-  }
 }
 
 init();

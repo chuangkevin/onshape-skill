@@ -118,6 +118,25 @@
       100% { transform: scale(1); opacity: 1; }
     }
     .wiz-check-anim { display:inline-block; color:#3fb950; font-size:20px; animation: wizCheckPop 0.4s ease-out; margin-left:8px; }
+
+    /* Project Landing Page */
+    .project-landing { position:fixed; inset:0; background:#0d1117; z-index:50; display:flex; align-items:center; justify-content:center; overflow-y:auto; }
+    .project-landing.hidden { display:none; }
+    .landing-content { max-width:800px; width:100%; padding:32px; }
+    .landing-content h2 { font-size:24px; margin-bottom:20px; text-align:center; }
+    .landing-actions { display:flex; justify-content:center; margin-bottom:24px; }
+    .landing-new-btn { padding:12px 24px; background:#238636; border:none; color:#fff; border-radius:8px; font-size:16px; cursor:pointer; }
+    .landing-new-btn:hover { background:#2ea043; }
+    .project-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px; }
+    .project-card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; cursor:pointer; transition:border-color 0.2s; }
+    .project-card:hover { border-color:#1f6feb; }
+    .project-card h3 { font-size:15px; margin-bottom:4px; }
+    .project-card .card-meta { font-size:12px; color:#8b949e; margin-bottom:12px; }
+    .project-card .card-actions { display:flex; gap:8px; }
+    .project-card .card-btn { padding:4px 12px; border:1px solid #30363d; background:#21262d; color:#c9d1d9; border-radius:4px; cursor:pointer; font-size:12px; }
+    .project-card .card-btn:hover { background:#30363d; }
+    .project-card .card-btn.danger { color:#f85149; border-color:#f8514933; }
+    .project-card .card-btn.danger:hover { background:#f8514922; }
   </style>
 </head>
 <body>
@@ -143,9 +162,25 @@
     <button type="button" class="tool-btn" id="modeToggle" style="margin-left:auto;">切換模式</button>
   </div>
 
+  <div id="projectLanding" class="project-landing">
+    <div class="landing-content">
+      <h2>你的量測專案</h2>
+      <div class="landing-actions">
+        <button type="button" class="landing-new-btn" id="newProjectBtn">+ 新建專案</button>
+      </div>
+      <div class="project-grid" id="projectGrid">
+        <!-- Dynamic project cards -->
+      </div>
+    </div>
+  </div>
+
   <div class="main">
     <div class="sidebar">
       <div class="sidebar-section">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <button type="button" class="card-btn" id="backToLanding" title="返回專案列表" style="padding:4px 12px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;cursor:pointer;font-size:12px;">&#8592;</button>
+          <span id="sidebarProjectName" style="font-size:13px;color:#58a6ff;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+        </div>
         <h3>照片</h3>
         <div class="photo-list" id="photoList"></div>
         <button type="button" class="action-btn" id="addPhotoBtn" style="margin-top:8px">+ 新增照片</button>
