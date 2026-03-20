@@ -25,13 +25,13 @@
 
 ## 4. Express Server & API Routes
 
-- [ ] 4.1 Create server entry (src/server/index.ts) with Express + static file serving
-- [ ] 4.2 Create projects routes: POST/GET/DELETE /api/projects
-- [ ] 4.3 Create photos routes: POST /api/projects/:id/photos (multer upload), GET, DELETE
-- [ ] 4.4 Create keys routes: GET/POST/DELETE /api/keys, GET /api/keys/stats
-- [ ] 4.5 Create analyze route: POST /api/projects/:id/analyze (triggers AI pipeline)
-- [ ] 4.6 Create export route: POST /api/projects/:id/export (save measurement.json)
-- [ ] 4.7 Test: API route tests with supertest
+- [x] 4.1 Create server entry (src/server/index.ts) with Express + static file serving
+- [x] 4.2 Create projects routes: POST/GET/DELETE /api/projects
+- [x] 4.3 Create photos routes: POST /api/projects/:id/photos (multer upload), GET, DELETE
+- [x] 4.4 Create keys routes: GET/POST/DELETE /api/keys, GET /api/keys/stats
+- [x] 4.5 Create analyze route: POST /api/projects/:id/analyze (triggers AI pipeline)
+- [x] 4.6 Create export route: POST /api/projects/:id/export (save measurement.json)
+- [x] 4.7 Test: API route tests with supertest
 
 ## 5. Frontend - Photo Upload & Workspace
 
