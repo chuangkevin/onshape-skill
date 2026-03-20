@@ -90,19 +90,19 @@
 
 ## 11. Measurement Fusion Engine
 
-- [ ] 11.1 Implement fusion.ts: merge data from official specs, OpenCV, user drawing, and Gemini Vision
-- [ ] 11.2 Implement priority-based resolution (official > opencv > user > vision)
-- [ ] 11.3 Implement source tracking for every measurement
-- [ ] 11.4 Implement confidence level assignment (high/medium/low)
-- [ ] 11.5 Implement conflict detection and reporting (>5% tolerance)
-- [ ] 11.6 Test: unit tests with multi-source mock data, conflict scenarios
+- [x] 11.1 Implement fusion.ts: merge data from official specs, OpenCV, user drawing, and Gemini Vision
+- [x] 11.2 Implement priority-based resolution (official > opencv > user > vision)
+- [x] 11.3 Implement source tracking for every measurement
+- [x] 11.4 Implement confidence level assignment (high/medium/low)
+- [x] 11.5 Implement conflict detection and reporting (>5% tolerance)
+- [x] 11.6 Test: unit tests with multi-source mock data, conflict scenarios
 
 ## 12. JSON Export
 
-- [ ] 12.1 Implement measurement.json generation from fused data
-- [ ] 12.2 Implement frontend "Export JSON" button (download file)
-- [ ] 12.3 Implement "Copy JSON" button (clipboard)
-- [ ] 12.4 Implement server-side save to specified directory path
+- [x] 12.1 Implement measurement.json generation from fused data
+- [x] 12.2 Implement frontend "Export JSON" button (download file)
+- [x] 12.3 Implement "Copy JSON" button (clipboard)
+- [x] 12.4 Implement server-side save to specified directory path
 - [ ] 12.5 Test: E2E test for export workflow, validate JSON schema
 
 ## 13. E2E Integration Test
