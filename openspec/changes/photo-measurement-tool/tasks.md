@@ -8,10 +8,10 @@
 
 ## 2. SQLite Database
 
-- [ ] 2.1 Create db.ts with SQLite setup + migration system (better-sqlite3)
-- [ ] 2.2 Create schema: settings, api_key_usage, projects, photos, drawings, features, analysis_results tables
-- [ ] 2.3 Seed initial data: 5 Gemini API keys into settings table
-- [ ] 2.4 Test: unit tests for db initialization and migrations
+- [x] 2.1 Create db.ts with SQLite setup + migration system (better-sqlite3)
+- [x] 2.2 Create schema: settings, api_key_usage, projects, photos, drawings, features, analysis_results tables
+- [x] 2.3 Seed initial data: 5 Gemini API keys into settings table
+- [x] 2.4 Test: unit tests for db initialization and migrations
 
 ## 3. Gemini Key Pool
 
