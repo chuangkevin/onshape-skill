@@ -5,6 +5,7 @@ import { store } from '../state/store.js';
 
 let points: Point[] = [];
 let idCounter = 0;
+let lastClickTime = 0;
 
 export function activatePolylineTool(
   drawingCanvas: HTMLCanvasElement,
@@ -13,18 +14,32 @@ export function activatePolylineTool(
   renderFn: () => void,
 ): () => void {
   points = [];
+  lastClickTime = 0;
 
   const onClick = (e: MouseEvent) => {
     if (e.button !== 0) return;
-    const rect = drawingCanvas.getBoundingClientRect();
-    const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const imgPt = photoLayer.screenToImage(screenPt.x, screenPt.y);
-    points.push(imgPt);
-    drawingLayer.setActivePoints([...points]);
-    renderFn();
+    if (photoLayer.isPanningNow) return;
+
+    // Debounce: ignore clicks within 300ms (part of dblclick)
+    const now = Date.now();
+    if (now - lastClickTime < 300) return;
+    lastClickTime = now;
+
+    // Use setTimeout to allow dblclick to cancel
+    setTimeout(() => {
+      const rect = drawingCanvas.getBoundingClientRect();
+      const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      const imgPt = photoLayer.screenToImage(screenPt.x, screenPt.y);
+      points.push(imgPt);
+      drawingLayer.setActivePoints([...points]);
+      renderFn();
+    }, 50);
   };
 
-  const onDblClick = (_e: MouseEvent) => {
+  const onDblClick = (e: MouseEvent) => {
+    e.preventDefault();
+    // Don't add the double-click point
+    lastClickTime = Date.now(); // prevent the pending setTimeout click
     if (points.length >= 2) {
       const shape: PolylineShape = {
         type: 'polyline',
@@ -62,7 +77,6 @@ export function activatePolylineTool(
   drawingCanvas.addEventListener('dblclick', onDblClick);
   window.addEventListener('keydown', onKeyDown);
 
-  // Return cleanup function
   return () => {
     drawingCanvas.removeEventListener('click', onClick);
     drawingCanvas.removeEventListener('dblclick', onDblClick);

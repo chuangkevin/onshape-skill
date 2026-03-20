@@ -16,6 +16,7 @@ export function activateArcTool(
 
   const onClick = (e: MouseEvent) => {
     if (e.button !== 0) return;
+    if (photoLayer.isPanningNow) return;
     const rect = drawingCanvas.getBoundingClientRect();
     const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     const imgPt = photoLayer.screenToImage(screenPt.x, screenPt.y);

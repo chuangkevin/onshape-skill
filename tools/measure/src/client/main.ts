@@ -25,11 +25,29 @@ const dimensionList = document.getElementById('dimensionList') as HTMLDivElement
 const statusCoords = document.getElementById('statusCoords') as HTMLSpanElement;
 const statusScale = document.getElementById('statusScale') as HTMLSpanElement;
 const statusTool = document.getElementById('statusTool') as HTMLSpanElement;
-const projectName = document.getElementById('projectName') as HTMLSpanElement;
+const projectNameEl = document.getElementById('projectName') as HTMLSpanElement;
+const toolHint = document.getElementById('toolHint') as HTMLDivElement;
+const analysisResults = document.getElementById('analysisResults') as HTMLDivElement;
+
+// ── Tool hints (Traditional Chinese) ──
+const TOOL_HINTS: Record<string, string> = {
+  select: '點擊選取圖形，按 Delete 刪除',
+  polyline: '逐點點擊描繪輪廓，按 Enter 或雙擊結束',
+  arc: '依序點擊起點、中點、終點繪製弧線',
+  hole: '點擊圓心位置，輸入半徑',
+  scale: '在尺規上點擊兩點，輸入實際距離（mm）',
+};
+
+const TOOL_NAMES: Record<string, string> = {
+  select: '選取', polyline: '多邊形', arc: '弧線', hole: '圓孔', scale: '比例尺',
+};
 
 // ── Canvas Layers ──
 const photoLayer = new PhotoLayer(photoCanvas);
 const drawingLayer = new DrawingLayer(drawingCanvas, photoLayer);
+
+// Attach pan/zoom events to drawingCanvas (the top layer that receives events)
+photoLayer.attachEvents(drawingCanvas);
 
 // ── Tool Management ──
 let cleanupTool: (() => void) | null = null;
@@ -56,6 +74,19 @@ function activateTool(tool: ToolType): void {
   }
 
   store.setActiveTool(tool);
+  showToolHint(tool);
+}
+
+function showToolHint(tool: string): void {
+  const hint = TOOL_HINTS[tool];
+  if (hint && tool !== 'select') {
+    toolHint.textContent = hint;
+    toolHint.classList.remove('hidden');
+    // Auto-hide after 4 seconds
+    setTimeout(() => toolHint.classList.add('hidden'), 4000);
+  } else {
+    toolHint.classList.add('hidden');
+  }
 }
 
 // ── Rendering ──
@@ -68,19 +99,37 @@ function renderDrawings(): void {
   );
 }
 
+function updateGuide(): void {
+  const state = store.getState();
+  const photo = store.getActivePhoto();
+  const steps = document.querySelectorAll('.guide-step');
+
+  let currentStep = 1;
+  if (state.photos.length > 0) currentStep = 2;
+  if (photo?.scale) currentStep = 3;
+  if (photo && photo.drawings.length > 0) currentStep = 4;
+  // Step 5 is always available once you have drawings
+
+  steps.forEach((el) => {
+    const step = parseInt((el as HTMLElement).dataset.step || '0');
+    el.classList.remove('active', 'done');
+    if (step < currentStep) el.classList.add('done');
+    else if (step === currentStep) el.classList.add('active');
+  });
+}
+
 function renderUI(): void {
   const state = store.getState();
   const photo = store.getActivePhoto();
 
   // Project name
-  projectName.textContent = state.projectName || '尚無專案';
+  projectNameEl.textContent = state.projectName || '尚無專案';
 
   // Tool buttons
   document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {
     btn.classList.toggle('active', (btn as HTMLElement).dataset.tool === state.activeTool);
   });
-  const toolNames: Record<string, string> = { select: '選取', polyline: '多邊形', arc: '弧線', hole: '圓孔', scale: '比例尺' };
-  statusTool.textContent = `工具：${toolNames[state.activeTool] ?? state.activeTool}`;
+  statusTool.textContent = `工具：${TOOL_NAMES[state.activeTool] ?? state.activeTool}`;
 
   // Photo list
   photoList.innerHTML = state.photos
@@ -90,8 +139,7 @@ function renderUI(): void {
       <img src="/uploads/${p.filename}" alt="${p.originalName}" />
       <span>${p.originalName}</span>
     </div>
-  `,
-    )
+  `)
     .join('');
 
   // Dropzone visibility
@@ -109,39 +157,31 @@ function renderUI(): void {
       statusScale.textContent = '比例尺：-';
     }
 
-    // Features
     featureList.innerHTML = photo.features
-      .map(
-        (f) => `
+      .map((f) => `
       <div class="feature-item">
         <span>${f.type}: ${f.label}</span>
         <button class="delete-btn" data-feat-id="${f.id}" type="button">&times;</button>
-      </div>
-    `,
-      )
+      </div>`)
       .join('') || '<p style="font-size:13px;color:#8b949e;">無標記特徵</p>';
 
-    // Dimensions
     dimensionList.innerHTML = photo.dimensions
-      .map(
-        (d) => `
+      .map((d) => `
       <div class="feature-item">
         <span>${d.location}: ${d.value_mm}mm</span>
         <button class="delete-btn" data-dim-id="${d.id}" type="button">&times;</button>
-      </div>
-    `,
-      )
+      </div>`)
       .join('') || '<p style="font-size:13px;color:#8b949e;">無手動尺寸</p>';
   }
+
+  updateGuide();
 }
 
 // ── Canvas Sizing ──
 function resizeCanvases(): void {
   const rect = workspace.getBoundingClientRect();
-  const w = rect.width;
-  const h = rect.height;
-  photoLayer.resize(w, h);
-  drawingLayer.resize(w, h);
+  photoLayer.resize(rect.width, rect.height);
+  drawingLayer.resize(rect.width, rect.height);
   renderDrawings();
 }
 
@@ -156,7 +196,6 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
   const state = store.getState();
   let projectId = state.projectId;
 
-  // Auto-create project if none exists
   if (!projectId) {
     const name = prompt('請輸入專案名稱：', '新量測專案') || '新量測專案';
     const project = await api.createProject(name);
@@ -183,9 +222,73 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
   renderUI();
 }
 
+// ── AI Analysis Display ──
+function showAnalysisLoading(): void {
+  analysisResults.innerHTML = `
+    <div class="results-panel">
+      <h4><span class="loading-spinner"></span> AI 分析中...</h4>
+      <p style="color:#8b949e;margin-top:6px;">正在使用 Gemini 進行 OCR、標籤辨識和形狀分析</p>
+    </div>`;
+}
+
+function showAnalysisResult(result: any): void {
+  const ai = result.result?.ai;
+  const opencv = result.result?.opencv;
+
+  let html = '<div class="results-panel"><h4>分析結果</h4>';
+
+  // OCR readings
+  if (ai?.ocr_readings?.length > 0) {
+    html += '<div style="margin-top:6px"><strong style="color:#58a6ff;">卡尺讀數：</strong></div>';
+    for (const r of ai.ocr_readings) {
+      html += `<div class="result-item"><span class="result-label">${r.location}：</span><span class="result-value">${r.value} ${r.unit}</span></div>`;
+    }
+  }
+
+  // Label info
+  if (ai?.label_info?.model_number) {
+    html += `<div style="margin-top:6px"><strong style="color:#58a6ff;">型號：</strong> ${ai.label_info.model_number}</div>`;
+    if (ai.label_info.manufacturer) {
+      html += `<div class="result-item"><span class="result-label">製造商：</span><span class="result-value">${ai.label_info.manufacturer}</span></div>`;
+    }
+  }
+
+  // Official specs
+  if (ai?.official_specs && Object.keys(ai.official_specs).length > 0) {
+    html += '<div style="margin-top:6px"><strong style="color:#58a6ff;">官方規格：</strong></div>';
+    for (const [key, val] of Object.entries(ai.official_specs)) {
+      html += `<div class="result-item"><span class="result-label">${key}：</span><span class="result-value">${val} mm</span></div>`;
+    }
+  }
+
+  // OpenCV
+  if (opencv) {
+    const totalContours = opencv.reduce((sum: number, o: any) => sum + (o.contours?.length || 0), 0);
+    const totalCircles = opencv.reduce((sum: number, o: any) => sum + (o.circles?.length || 0), 0);
+    html += `<div style="margin-top:6px"><strong style="color:#58a6ff;">OpenCV：</strong> ${totalContours} 個輪廓, ${totalCircles} 個圓</div>`;
+    if (opencv.some((o: any) => o.error)) {
+      html += `<div class="result-error">OpenCV 錯誤：${opencv.find((o: any) => o.error)?.error}</div>`;
+    }
+  }
+
+  if (!ai?.ocr_readings?.length && !ai?.label_info && !ai?.official_specs) {
+    html += '<div style="color:#8b949e;margin-top:6px;">未偵測到數據。請確認照片中包含卡尺、標籤或尺規。</div>';
+  }
+
+  html += '</div>';
+  analysisResults.innerHTML = html;
+}
+
+function showAnalysisError(err: any): void {
+  analysisResults.innerHTML = `
+    <div class="results-panel">
+      <h4 style="color:#f85149;">分析失敗</h4>
+      <div class="result-error">${err.message || err}</div>
+    </div>`;
+}
+
 // ── Event Handlers ──
 function setupEvents(): void {
-  // File input
   addPhotoBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
     if (fileInput.files?.length) handleFiles(fileInput.files);
@@ -225,30 +328,16 @@ function setupEvents(): void {
 
   // Undo / Redo
   document.getElementById('undoBtn')!.addEventListener('click', () => {
-    store.undo();
-    renderDrawings();
-    renderUI();
+    store.undo(); renderDrawings(); renderUI();
   });
   document.getElementById('redoBtn')!.addEventListener('click', () => {
-    store.redo();
-    renderDrawings();
-    renderUI();
+    store.redo(); renderDrawings(); renderUI();
   });
 
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'z') {
-      e.preventDefault();
-      store.undo();
-      renderDrawings();
-      renderUI();
-    }
-    if (e.ctrlKey && e.key === 'y') {
-      e.preventDefault();
-      store.redo();
-      renderDrawings();
-      renderUI();
-    }
+    if (e.ctrlKey && e.key === 'z') { e.preventDefault(); store.undo(); renderDrawings(); renderUI(); }
+    if (e.ctrlKey && e.key === 'y') { e.preventDefault(); store.redo(); renderDrawings(); renderUI(); }
   });
 
   // Angle select
@@ -260,27 +349,14 @@ function setupEvents(): void {
     }
   });
 
-  // Feature delete
+  // Feature/dimension delete
   featureList.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest('.delete-btn') as HTMLElement;
-    if (!btn) return;
-    const id = btn.dataset.featId;
-    if (id) {
-      store.removeFeature(id);
-      renderDrawings();
-      renderUI();
-    }
+    if (btn?.dataset.featId) { store.removeFeature(btn.dataset.featId); renderDrawings(); renderUI(); }
   });
-
-  // Dimension delete
   dimensionList.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest('.delete-btn') as HTMLElement;
-    if (!btn) return;
-    const id = btn.dataset.dimId;
-    if (id) {
-      store.removeDimension(id);
-      renderUI();
-    }
+    if (btn?.dataset.dimId) { store.removeDimension(btn.dataset.dimId); renderUI(); }
   });
 
   // Add dimension
@@ -290,24 +366,23 @@ function setupEvents(): void {
     const location = locInput.value.trim();
     const value = parseFloat(valInput.value);
     if (location && value > 0) {
-      store.addDimension({
-        id: `dim_${Date.now()}`,
-        location,
-        value_mm: value,
-        source: 'user_input',
-      });
-      locInput.value = '';
-      valInput.value = '';
+      store.addDimension({ id: `dim_${Date.now()}`, location, value_mm: value, source: 'user_input' });
+      locInput.value = ''; valInput.value = '';
       renderUI();
     }
   });
 
-  // Analyze
+  // AI Analyze
   document.getElementById('analyzeBtn')!.addEventListener('click', async () => {
     const projectId = store.getState().projectId;
     if (!projectId) return alert('請先建立專案');
-    const result = await api.analyzeProject(projectId);
-    alert(JSON.stringify(result, null, 2));
+    showAnalysisLoading();
+    try {
+      const result = await api.analyzeProject(projectId);
+      showAnalysisResult(result);
+    } catch (err: any) {
+      showAnalysisError(err);
+    }
   });
 
   // Export JSON
@@ -317,10 +392,7 @@ function setupEvents(): void {
     const result = await api.exportMeasurement(projectId);
     const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'measurement.json';
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = 'measurement.json'; a.click();
     URL.revokeObjectURL(url);
   });
 
@@ -336,20 +408,17 @@ function setupEvents(): void {
   // Mouse coordinate tracking
   drawingCanvas.addEventListener('pointermove', (e) => {
     const rect = drawingCanvas.getBoundingClientRect();
-    const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const imgPt = photoLayer.screenToImage(screenPt.x, screenPt.y);
+    const imgPt = photoLayer.screenToImage(e.clientX - rect.left, e.clientY - rect.top);
     const photo = store.getActivePhoto();
     if (photo?.scale) {
-      const mmX = (imgPt.x / photo.scale.px_per_mm).toFixed(1);
-      const mmY = (imgPt.y / photo.scale.px_per_mm).toFixed(1);
-      statusCoords.textContent = `${mmX}, ${mmY} mm (px: ${imgPt.x.toFixed(0)}, ${imgPt.y.toFixed(0)})`;
+      statusCoords.textContent = `${(imgPt.x / photo.scale.px_per_mm).toFixed(1)}, ${(imgPt.y / photo.scale.px_per_mm).toFixed(1)} mm`;
     } else {
       statusCoords.textContent = `px: ${imgPt.x.toFixed(0)}, ${imgPt.y.toFixed(0)}`;
     }
   });
 
-  // Transform changes → re-render drawing layer
-  photoCanvas.addEventListener('transform-change', () => renderDrawings());
+  // Transform changes
+  drawingCanvas.addEventListener('transform-change', () => renderDrawings());
 
   // Window resize
   window.addEventListener('resize', resizeCanvases);
@@ -362,23 +431,23 @@ async function init(): Promise<void> {
   activateTool('select');
   renderUI();
 
-  // Check for existing projects
+  // Load existing project (skip garbled names)
   const projects = await api.listProjects();
-  if (projects.length > 0) {
-    const latest = projects[0];
-    store.setProject(latest.id, latest.name);
-    const photos = await api.listPhotos(latest.id);
+  const validProject = projects.find((p) => {
+    // Skip projects with garbled names (non-printable characters)
+    return p.name && !/[\uFFFD]/.test(p.name) && p.name.length > 0;
+  });
+
+  if (validProject) {
+    store.setProject(validProject.id, validProject.name);
+    const photos = await api.listPhotos(validProject.id);
     if (photos.length > 0) {
       store.setPhotos(
         photos.map((p) => ({
-          id: p.id,
-          filename: p.filename,
-          originalName: p.original_name,
+          id: p.id, filename: p.filename, originalName: p.original_name,
           angle: (p.angle || 'top') as ViewAngle,
           scale: p.scale_data ? JSON.parse(p.scale_data) : null,
-          drawings: [],
-          features: [],
-          dimensions: [],
+          drawings: [], features: [], dimensions: [],
         })),
       );
       await loadPhoto(store.getActivePhoto()!);

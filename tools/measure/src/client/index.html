@@ -60,6 +60,31 @@
     .action-btn.primary { background: #238636; border-color: #238636; color: #fff; }
     .action-btn.primary:hover { background: #2ea043; }
     .status-bar { padding: 4px 16px; background: #161b22; border-top: 1px solid #30363d; font-size: 12px; color: #8b949e; display: flex; gap: 16px; }
+
+    /* Workflow guide */
+    .guide { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; margin: 8px 0; }
+    .guide-step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; font-size: 13px; line-height: 1.5; opacity: 0.5; }
+    .guide-step.active { opacity: 1; }
+    .guide-step.done { opacity: 0.7; }
+    .guide-step .step-num { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: #30363d; color: #c9d1d9; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+    .guide-step.active .step-num { background: #1f6feb; color: #fff; }
+    .guide-step.done .step-num { background: #238636; color: #fff; }
+    .guide-step .step-text { flex: 1; }
+    .guide-step .step-hint { font-size: 12px; color: #8b949e; margin-top: 2px; }
+
+    /* Tool hint overlay */
+    .tool-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 13px; z-index: 20; pointer-events: none; white-space: nowrap; }
+    .tool-hint.hidden { display: none; }
+
+    /* Results panel */
+    .results-panel { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-top: 8px; font-size: 13px; max-height: 200px; overflow-y: auto; }
+    .results-panel h4 { color: #58a6ff; margin-bottom: 6px; font-size: 13px; }
+    .results-panel .result-item { padding: 3px 0; border-bottom: 1px solid #21262d; }
+    .results-panel .result-label { color: #8b949e; }
+    .results-panel .result-value { color: #c9d1d9; font-weight: 500; }
+    .results-panel .result-error { color: #f85149; }
+    .loading-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #1f6feb; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -99,10 +124,36 @@
             <p>或點擊瀏覽檔案（支援 JPEG、PNG、WebP）</p>
           </div>
         </div>
+        <div class="tool-hint hidden" id="toolHint"></div>
       </div>
     </div>
 
     <div class="right-panel">
+      <div class="sidebar-section">
+        <h3>操作流程</h3>
+        <div class="guide" id="guidePanel">
+          <div class="guide-step active" data-step="1">
+            <span class="step-num">1</span>
+            <div class="step-text">上傳照片<div class="step-hint">拖曳或點擊左側「+ 新增照片」</div></div>
+          </div>
+          <div class="guide-step" data-step="2">
+            <span class="step-num">2</span>
+            <div class="step-text">校準比例尺<div class="step-hint">點擊工具列「比例尺」，在照片中的尺規上點兩點，輸入實際距離</div></div>
+          </div>
+          <div class="guide-step" data-step="3">
+            <span class="step-num">3</span>
+            <div class="step-text">描繪輪廓<div class="step-hint">點擊「多邊形」，沿零件邊緣逐點描繪，雙擊或按 Enter 結束</div></div>
+          </div>
+          <div class="guide-step" data-step="4">
+            <span class="step-num">4</span>
+            <div class="step-text">標記特徵（選填）<div class="step-hint">用「圓孔」標記螺絲孔，或在下方手動輸入卡尺尺寸</div></div>
+          </div>
+          <div class="guide-step" data-step="5">
+            <span class="step-num">5</span>
+            <div class="step-text">AI 分析 + 匯出<div class="step-hint">點擊「AI 分析」讓 Gemini 讀取數據，完成後「匯出 JSON」</div></div>
+          </div>
+        </div>
+      </div>
       <div class="sidebar-section">
         <h3>拍攝角度</h3>
         <select class="angle-select" id="angleSelect" title="拍攝角度">
@@ -135,6 +186,7 @@
         <button type="button" class="action-btn primary" id="analyzeBtn">AI 分析</button>
         <button type="button" class="action-btn" id="exportBtn">匯出 JSON</button>
         <button type="button" class="action-btn" id="copyJsonBtn">複製 JSON</button>
+        <div id="analysisResults"></div>
       </div>
     </div>
   </div>
