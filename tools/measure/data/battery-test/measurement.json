@@ -1,0 +1,49 @@
+{
+  "part_name": "L390 電池",
+  "model_number": null,
+  "official_specs": {},
+  "views": [
+    {
+      "image": "1773998342577-z89052.jpg",
+      "angle": "top",
+      "scale_px_per_mm": 0,
+      "contour_mm": [],
+      "features": [],
+      "source": "gemini_vision"
+    },
+    {
+      "image": "1773998347856-lf5wdz.jpg",
+      "angle": "top",
+      "scale_px_per_mm": 0,
+      "contour_mm": [],
+      "features": [],
+      "source": "gemini_vision"
+    },
+    {
+      "image": "1773998347859-fssetv.jpg",
+      "angle": "top",
+      "scale_px_per_mm": 0,
+      "contour_mm": [],
+      "features": [],
+      "source": "gemini_vision"
+    },
+    {
+      "image": "1773998347896-fsj7yl.jpg",
+      "angle": "top",
+      "scale_px_per_mm": 0,
+      "contour_mm": [],
+      "features": [],
+      "source": "gemini_vision"
+    }
+  ],
+  "caliper_readings": [],
+  "confidence": {
+    "overall": "low"
+  },
+  "_meta": {
+    "project_id": 33,
+    "photo_count": 4,
+    "conflicts": [],
+    "exported_at": "2026-03-20T09:19:15.052Z"
+  }
+}
