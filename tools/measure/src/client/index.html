@@ -4,12 +4,167 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Photo Measure</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Header */
+    .header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #161b22; border-bottom: 1px solid #30363d; }
+    .header h1 { font-size: 16px; font-weight: 600; }
+    .header .project-name { color: #58a6ff; font-size: 14px; }
+
+    /* Main layout */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* Sidebar */
+    .sidebar { width: 240px; background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; }
+    .sidebar-section { padding: 12px; border-bottom: 1px solid #30363d; }
+    .sidebar-section h3 { font-size: 12px; text-transform: uppercase; color: #8b949e; margin-bottom: 8px; letter-spacing: 0.5px; }
+
+    /* Photo thumbnails */
+    .photo-list { display: flex; flex-direction: column; gap: 4px; }
+    .photo-thumb { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .photo-thumb:hover { background: #21262d; }
+    .photo-thumb.active { background: #1f6feb33; border: 1px solid #1f6feb; }
+    .photo-thumb img { width: 40px; height: 30px; object-fit: cover; border-radius: 4px; }
+
+    /* Toolbar */
+    .toolbar { display: flex; gap: 4px; padding: 8px 12px; background: #161b22; border-bottom: 1px solid #30363d; }
+    .tool-btn { padding: 6px 12px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .tool-btn:hover { background: #30363d; }
+    .tool-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    .tool-sep { width: 1px; background: #30363d; margin: 0 4px; }
+
+    /* Canvas workspace */
+    .workspace { flex: 1; position: relative; overflow: hidden; }
+    .workspace canvas { position: absolute; top: 0; left: 0; }
+    #photoCanvas { z-index: 1; }
+    #drawingCanvas { z-index: 2; cursor: crosshair; }
+
+    /* Upload dropzone */
+    .dropzone { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; z-index: 10; }
+    .dropzone.hidden { display: none; }
+    .dropzone-box { border: 2px dashed #30363d; border-radius: 12px; padding: 48px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+    .dropzone-box:hover, .dropzone-box.dragover { border-color: #1f6feb; }
+    .dropzone-box h2 { font-size: 18px; margin-bottom: 8px; }
+    .dropzone-box p { color: #8b949e; font-size: 14px; }
+
+    /* Right panel */
+    .right-panel { width: 260px; background: #161b22; border-left: 1px solid #30363d; overflow-y: auto; }
+    .right-panel .sidebar-section { padding: 12px; }
+
+    /* View angle select */
+    .angle-select { width: 100%; padding: 4px 8px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; }
+
+    /* Feature list */
+    .feature-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; font-size: 13px; border-radius: 4px; }
+    .feature-item:hover { background: #21262d; }
+    .feature-item .delete-btn { color: #f85149; cursor: pointer; background: none; border: none; font-size: 16px; }
+
+    /* Dimension input */
+    .dim-form { display: flex; flex-direction: column; gap: 6px; }
+    .dim-form input { padding: 4px 8px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; font-size: 13px; }
+    .dim-form button { padding: 4px 8px; background: #238636; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-size: 13px; }
+
+    /* Scale info */
+    .scale-info { font-size: 13px; color: #58a6ff; padding: 4px 0; }
+
+    /* Action buttons */
+    .action-btn { width: 100%; padding: 8px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 4px; }
+    .action-btn:hover { background: #30363d; }
+    .action-btn.primary { background: #238636; border-color: #238636; color: #fff; }
+    .action-btn.primary:hover { background: #2ea043; }
+
+    /* Status bar */
+    .status-bar { padding: 4px 16px; background: #161b22; border-top: 1px solid #30363d; font-size: 12px; color: #8b949e; display: flex; gap: 16px; }
+  </style>
 </head>
 <body>
-  <div id="app">
+  <div class="header">
     <h1>Photo Measure</h1>
-    <p>Loading...</p>
+    <span class="project-name" id="projectName">No project</span>
   </div>
+
+  <div class="main">
+    <!-- Left sidebar: photos -->
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <h3>Photos</h3>
+        <div class="photo-list" id="photoList"></div>
+        <button class="action-btn" id="addPhotoBtn" style="margin-top:8px">+ Add Photos</button>
+        <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/webp" style="display:none" />
+      </div>
+    </div>
+
+    <!-- Center: toolbar + canvas -->
+    <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+      <div class="toolbar">
+        <button class="tool-btn active" data-tool="select">Select</button>
+        <button class="tool-btn" data-tool="polyline">Polyline</button>
+        <button class="tool-btn" data-tool="arc">Arc</button>
+        <button class="tool-btn" data-tool="hole">Hole</button>
+        <div class="tool-sep"></div>
+        <button class="tool-btn" data-tool="scale">Scale</button>
+        <div class="tool-sep"></div>
+        <button class="tool-btn" id="undoBtn">Undo</button>
+        <button class="tool-btn" id="redoBtn">Redo</button>
+      </div>
+      <div class="workspace" id="workspace">
+        <canvas id="photoCanvas"></canvas>
+        <canvas id="drawingCanvas"></canvas>
+        <div class="dropzone" id="dropzone">
+          <div class="dropzone-box" id="dropzoneBox">
+            <h2>Drop photos here</h2>
+            <p>or click to browse (JPEG, PNG, WebP)</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right panel: properties -->
+    <div class="right-panel">
+      <div class="sidebar-section">
+        <h3>View Angle</h3>
+        <select class="angle-select" id="angleSelect" title="View angle">
+          <option value="top">Top</option>
+          <option value="side">Side</option>
+          <option value="front">Front</option>
+          <option value="back">Back</option>
+          <option value="close-up">Close-up</option>
+        </select>
+      </div>
+      <div class="sidebar-section">
+        <h3>Scale</h3>
+        <div class="scale-info" id="scaleInfo">Not calibrated</div>
+      </div>
+      <div class="sidebar-section">
+        <h3>Features</h3>
+        <div id="featureList"></div>
+      </div>
+      <div class="sidebar-section">
+        <h3>Manual Dimensions</h3>
+        <div id="dimensionList"></div>
+        <div class="dim-form" style="margin-top:8px">
+          <input type="text" id="dimLocation" placeholder="Location (e.g., thickness)" />
+          <input type="number" id="dimValue" placeholder="Value (mm)" step="0.1" />
+          <button class="dim-form button" id="addDimBtn" style="padding:4px 8px; background:#238636; border:none; color:#fff; border-radius:4px; cursor:pointer;">Add</button>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <h3>Actions</h3>
+        <button class="action-btn primary" id="analyzeBtn">Analyze with AI</button>
+        <button class="action-btn" id="exportBtn">Export JSON</button>
+        <button class="action-btn" id="copyJsonBtn">Copy JSON</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <span id="statusCoords">-</span>
+    <span id="statusScale">Scale: -</span>
+    <span id="statusTool">Tool: Select</span>
+  </div>
+
   <script type="module" src="./main.ts"></script>
 </body>
 </html>

@@ -35,36 +35,36 @@
 
 ## 5. Frontend - Photo Upload & Workspace
 
-- [ ] 5.1 Create index.html with basic layout (toolbar, canvas workspace, side panels)
-- [ ] 5.2 Implement photo upload (drag-and-drop + file picker) with thumbnail gallery
-- [ ] 5.3 Implement PhotoLayer.ts: render photo on Canvas with pan (space+drag) and zoom (scroll wheel)
-- [ ] 5.4 Implement view angle tagging UI (top/side/front/back/close-up selector)
+- [x] 5.1 Create index.html with basic layout (toolbar, canvas workspace, side panels)
+- [x] 5.2 Implement photo upload (drag-and-drop + file picker) with thumbnail gallery
+- [x] 5.3 Implement PhotoLayer.ts: render photo on Canvas with pan (space+drag) and zoom (scroll wheel)
+- [x] 5.4 Implement view angle tagging UI (top/side/front/back/close-up selector)
 - [ ] 5.5 Test: E2E test for photo upload and display
 
 ## 6. Frontend - Drawing Overlay
 
-- [ ] 6.1 Implement DrawingLayer.ts: transparent Canvas overlay with pointer event handling
-- [ ] 6.2 Implement PolylineTool.ts: click-to-place vertices, double-click to close
-- [ ] 6.3 Implement ArcTool.ts: 3-point arc drawing
-- [ ] 6.4 Implement SelectTool.ts: select, move, delete drawn shapes
-- [ ] 6.5 Implement undo/redo system (Ctrl+Z / Ctrl+Y)
-- [ ] 6.6 Implement overlay export (standalone PNG + composite photo+overlay)
+- [x] 6.1 Implement DrawingLayer.ts: transparent Canvas overlay with pointer event handling
+- [x] 6.2 Implement PolylineTool.ts: click-to-place vertices, double-click to close
+- [x] 6.3 Implement ArcTool.ts: 3-point arc drawing
+- [x] 6.4 Implement SelectTool.ts: select, move, delete drawn shapes
+- [x] 6.5 Implement undo/redo system (Ctrl+Z / Ctrl+Y)
+- [x] 6.6 Implement overlay export (standalone PNG + composite photo+overlay)
 - [ ] 6.7 Test: E2E test for drawing tools and undo/redo
 
 ## 7. Frontend - Scale Calibration
 
-- [ ] 7.1 Implement ScaleTool.ts: two-point click + distance input dialog
-- [ ] 7.2 Implement px/mm conversion and display scale bar
-- [ ] 7.3 Wire scale to all drawing coordinates (show mm values on hover)
-- [ ] 7.4 Implement per-photo calibration storage
+- [x] 7.1 Implement ScaleTool.ts: two-point click + distance input dialog
+- [x] 7.2 Implement px/mm conversion and display scale bar
+- [x] 7.3 Wire scale to all drawing coordinates (show mm values on hover)
+- [x] 7.4 Implement per-photo calibration storage
 - [ ] 7.5 Test: E2E test for scale calibration and coordinate conversion
 
 ## 8. Frontend - Feature Annotation
 
-- [ ] 8.1 Implement HoleTool.ts: click center + radius input for circle marking
-- [ ] 8.2 Implement feature type selector (hole, tab, slot, connector, mounting-point, custom)
-- [ ] 8.3 Implement manual dimension input panel (location + value_mm)
-- [ ] 8.4 Implement feature list panel with select/edit/delete
+- [x] 8.1 Implement HoleTool.ts: click center + radius input for circle marking
+- [x] 8.2 Implement feature type selector (hole, tab, slot, connector, mounting-point, custom)
+- [x] 8.3 Implement manual dimension input panel (location + value_mm)
+- [x] 8.4 Implement feature list panel with select/edit/delete
 - [ ] 8.5 Test: E2E test for feature annotation workflow
 
 ## 9. Python OpenCV Edge Detection
