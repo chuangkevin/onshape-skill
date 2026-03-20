@@ -165,16 +165,23 @@ if __name__ == "__main__":
 
     image_path = argv[0]
     roi = None
-    if len(argv) >= 2:
-        try:
-            roi = json.loads(argv[1])
-        except json.JSONDecodeError:
-            print(json.dumps({"error": f"Invalid ROI JSON: {argv[1]}"}))
-            sys.exit(1)
-
     epsilon = 0.005
-    if len(argv) >= 3:
-        epsilon = float(argv[2])
+
+    # Parse remaining positional args: [roi_json] [epsilon]
+    # roi_json must be a JSON object (dict), epsilon is a float
+    for arg in argv[1:]:
+        try:
+            parsed = json.loads(arg)
+            if isinstance(parsed, dict):
+                roi = parsed
+            elif isinstance(parsed, (int, float)):
+                epsilon = float(parsed)
+        except (json.JSONDecodeError, ValueError):
+            # Try as epsilon float
+            try:
+                epsilon = float(arg)
+            except ValueError:
+                pass
 
     result = detect_edges(image_path, roi, epsilon, max_size)
     print(json.dumps(result))

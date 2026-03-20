@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
@@ -62,6 +62,13 @@ export async function checkPython(): Promise<boolean> {
     for (const p of ['/usr/bin/python3', '/usr/local/bin/python3']) {
       if (existsSync(p)) candidates.push(p);
     }
+  }
+
+  // 4. Last resort: try bare command names (relies on shell PATH)
+  if (IS_WINDOWS) {
+    candidates.push('python', 'python3');
+  } else {
+    candidates.push('python3', 'python');
   }
 
   // De-duplicate while preserving order
@@ -177,16 +184,22 @@ export function deriveROI(
 
 function runCommand(cmd: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(cmd, args, {
+    // On Windows with shell:true, wrap args containing spaces/semicolons in double quotes
+    const safeArgs = IS_WINDOWS
+      ? args.map(a => (a.includes(' ') || a.includes(';')) ? `"${a}"` : a)
+      : args;
+
+    const proc = spawn(cmd, safeArgs, {
       shell: true,
       windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024, // 10MB for large contour outputs
-    }, (error, stdout, stderr) => {
-      resolve({
-        exitCode: error ? (error as any).code ?? 1 : 0,
-        stdout: stdout ?? '',
-        stderr: stderr ?? '',
-      });
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
+    proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
+    proc.on('close', (code: number | null) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    proc.on('error', (e: Error) => resolve({ exitCode: 1, stdout, stderr: e.message }));
   });
 }
