@@ -69,13 +69,13 @@
 
 ## 9. Python OpenCV Edge Detection
 
-- [ ] 9.1 Create edge_detect.py: accept image path + ROI JSON, run Canny edge detection
-- [ ] 9.2 Implement contour extraction with findContours + approxPolyDP
-- [ ] 9.3 Implement circle detection with HoughCircles
-- [ ] 9.4 Create opencv.ts wrapper: spawn Python subprocess, parse JSON output
-- [ ] 9.5 Implement ROI derivation from user drawing bounding box (+10% padding)
-- [ ] 9.6 Implement Python availability check on server startup
-- [ ] 9.7 Test: unit tests with sample images, fallback when Python unavailable
+- [x] 9.1 Create edge_detect.py: accept image path + ROI JSON, run Canny edge detection
+- [x] 9.2 Implement contour extraction with findContours + approxPolyDP
+- [x] 9.3 Implement circle detection with HoughCircles
+- [x] 9.4 Create opencv.ts wrapper: spawn Python subprocess, parse JSON output
+- [x] 9.5 Implement ROI derivation from user drawing bounding box (+10% padding)
+- [x] 9.6 Implement Python availability check on server startup
+- [x] 9.7 Test: unit tests with sample images, fallback when Python unavailable
 
 ## 10. Gemini AI Analysis Pipeline
 
