@@ -1,61 +1,53 @@
-# UX 審計報告
-日期: 2026-03-20T08:19:35.693Z
-測試照片: D:/Projects/trackpoint-laptop/doc/L390/硬體參考/鍵盤/S__10092548_0.jpg
+# UX 審計報告（新流程）
+日期: 2026-03-20T08:41:34.883Z
 
 ## 審計結果
 
-### 01-首次開啟
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\01-首次開啟.png
+### 01-Landing
+結果: Landing Page 可見 ✓
+
+### 01-新建按鈕
+結果: 新建專案按鈕可見 ✓
+
+### 02-專案建立
+結果: Landing 已隱藏 ✓
+
+### 03-模式選擇
 結果: 模式選擇器可見 ✓
 
-### 02-選擇引導模式
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\02-選擇引導模式後.png
+### 04-Workspace
+結果: Workspace 可見 ✓
+
+### 04-Wizard
 結果: Wizard 可見 ✓
 
-### 02-Wizard步驟
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\02-選擇引導模式後.png
-結果: 當前步驟: "① 上傳照片"
+### 05-上傳照片
+結果: 照片縮圖 (1張) ✓
 
-### 03-上傳照片
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\03-上傳照片後.png
-結果: 照片縮圖出現 (1張) ✓
+### 05-Wizard步驟
+結果: 當前步驟: "② 確認比例尺"
 
-### 03-Wizard步驟
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\03-上傳照片後.png
-結果: 上傳後步驟: "③ 確認輪廓"
+### 05-Wizard內容
+結果: 內容: "
+        未偵測到尺規，請手動校準比例尺
+        在照片中的尺規上點擊兩個刻度點..."
 
-### 03-工具狀態
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\03-上傳照片後.png
-結果: 當前工具: "選取"
+### 06-分析後步驟
+結果: 當前步驟: "② 確認比例尺"
 
-### 03-Dropzone
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\03-上傳照片後.png
-結果: Dropzone 已隱藏 ✓
+### 06-分析結果
+結果: 內容: "
+        未偵測到尺規，請手動校準比例尺
+        在照片中的尺規上點擊兩個刻度點..."
 
-### 04-同步檢查
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\04-面板同步檢查.png
-結果: 右側面板步驟: "校準比例尺點擊工具列「比例尺」，在照片中的尺規上點兩點，輸入實際距離" / Wizard步驟: "③ 確認輪廓"
+### 06-比例尺偵測
+結果: 偵測到比例尺，顯示確認 ✓
 
-### 05-工具提示
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\04-面板同步檢查.png
-結果: 提示可見: "沿零件邊緣逐點點擊，按 Enter 或雙擊結束封閉輪廓" ✓
+### 07-右側面板
+結果: Wizard模式下操作流程已隱藏 ✓
 
-### 06-比例尺互動
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\06-點擊比例尺後.png
-結果: 嘗試點擊兩點（prompt dialog 可能出現）
+### 08-Sidebar
+結果: 專案名稱: "E2E 測試專案" ✓
 
-### 07-按鈕狀態
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\06-點擊比例尺後.png
-結果: 所有按鈕: 切換至自由模式(可用), 選取(可用), 多邊形(可用), 弧線(可用), 圓孔(可用), 比例尺(可用), 復原(可用), 重做(可用), 上一步(可用), 跳過(可用), 下一步(可用)
-
-### 08-AI分析按鈕
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\06-點擊比例尺後.png
-結果: 可見: "AI 分析" ✓
-
-### 09-匯出按鈕
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\06-點擊比例尺後.png
-結果: 匯出按鈕可見 ✓
-
-### 10-模式切換
-截圖: D:\Projects\onshape-skill\tools\measure\data\ux-audit\10-自由模式.png
-結果: 切到自由模式，Wizard 隱藏 ✓
+### 08-返回按鈕
+結果: ← 返回按鈕可見 ✓

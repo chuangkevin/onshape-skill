@@ -516,6 +516,7 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
     const project = await api.createProject(name);
     projectId = project.id;
     store.setProject(project.id, project.name);
+    hideLanding();
   }
 
   const uploaded = await api.uploadPhotos(projectId, files);
