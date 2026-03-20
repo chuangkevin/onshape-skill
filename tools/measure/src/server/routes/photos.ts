@@ -114,6 +114,30 @@ router.patch('/:projectId/photos/:photoId', (req, res) => {
   res.json(photo);
 });
 
+// PATCH /api/projects/:projectId/apply-scale
+router.patch('/:projectId/apply-scale', (req, res) => {
+  const db = getDb();
+  const { scale_data } = req.body;
+
+  if (!scale_data) {
+    res.status(400).json({ error: 'scale_data is required' });
+    return;
+  }
+
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.projectId);
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const scaleStr = typeof scale_data === 'string' ? scale_data : JSON.stringify(scale_data);
+  const result = db.prepare(
+    'UPDATE photos SET scale_data = ? WHERE project_id = ?'
+  ).run(scaleStr, req.params.projectId);
+
+  res.json({ updated: result.changes });
+});
+
 // DELETE /api/projects/:projectId/photos/:photoId
 router.delete('/:projectId/photos/:photoId', (req, res) => {
   const db = getDb();

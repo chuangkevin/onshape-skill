@@ -2,11 +2,14 @@
 OpenCV edge detection and contour extraction for Photo Measure.
 
 Usage:
-    python edge_detect.py <image_path> [roi_json]
+    python edge_detect.py <image_path> [roi_json] [epsilon] [--max-size N]
 
 Input:
     image_path: Path to image file
     roi_json: Optional JSON string with ROI: {"x": 0, "y": 0, "width": 800, "height": 600}
+    epsilon: Optional approxPolyDP factor (default 0.005)
+    --max-size N: Resize image so longest edge <= N px before processing.
+                  Output coordinates are scaled back to original image size.
 
 Output:
     JSON to stdout with contours and circles detected.
@@ -18,11 +21,32 @@ import numpy as np
 import cv2
 
 
-def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float = 0.005) -> dict:
+def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float = 0.005, max_size: int | None = None) -> dict:
     """Run edge detection and contour extraction on an image."""
     img = cv2.imread(image_path)
     if img is None:
         return {"error": f"Cannot read image: {image_path}", "contours": [], "circles": []}
+
+    orig_h, orig_w = img.shape[:2]
+    scale = 1.0
+
+    # Resize so longest edge <= max_size (process at lower res, scale coords back)
+    if max_size is not None:
+        longest = max(orig_w, orig_h)
+        if longest > max_size:
+            scale = longest / max_size
+            new_w = int(round(orig_w / scale))
+            new_h = int(round(orig_h / scale))
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+    # Scale ROI coordinates to resized image space
+    if roi and scale != 1.0:
+        roi = {
+            "x": roi["x"] / scale,
+            "y": roi["y"] / scale,
+            "width": roi["width"] / scale,
+            "height": roi["height"] / scale,
+        }
 
     # Crop to ROI if provided
     if roi:
@@ -67,23 +91,23 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
         epsilon = epsilon_factor * peri
         approx = cv2.approxPolyDP(contour, epsilon, True)
 
-        # Convert to point list with ROI offset
+        # Convert to point list with ROI offset, scaled back to original image coords
         points = []
         for pt in approx:
             points.append([
-                int(pt[0][0]) + roi_offset[0],
-                int(pt[0][1]) + roi_offset[1]
+                int(round((pt[0][0] + roi_offset[0]) * scale)),
+                int(round((pt[0][1] + roi_offset[1]) * scale))
             ])
 
         bbox = cv2.boundingRect(contour)
         contours_result.append({
             "contour_px": points,
-            "area_px": float(area),
+            "area_px": float(area) * (scale * scale),
             "bounding_box": {
-                "x": int(bbox[0]) + roi_offset[0],
-                "y": int(bbox[1]) + roi_offset[1],
-                "width": int(bbox[2]),
-                "height": int(bbox[3]),
+                "x": int(round((bbox[0] + roi_offset[0]) * scale)),
+                "y": int(round((bbox[1] + roi_offset[1]) * scale)),
+                "width": int(round(bbox[2] * scale)),
+                "height": int(round(bbox[3] * scale)),
             },
             "point_count_original": len(contour),
             "point_count_simplified": len(approx),
@@ -110,36 +134,47 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
             cx, cy, r = circle
             circles_result.append({
                 "center_px": {
-                    "x": float(cx) + roi_offset[0],
-                    "y": float(cy) + roi_offset[1],
+                    "x": (float(cx) + roi_offset[0]) * scale,
+                    "y": (float(cy) + roi_offset[1]) * scale,
                 },
-                "radius_px": float(r),
+                "radius_px": float(r) * scale,
             })
 
     return {
         "contours": contours_result,
         "circles": circles_result,
-        "image_size": {"width": img.shape[1], "height": img.shape[0]},
+        "image_size": {"width": orig_w, "height": orig_h},
     }
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: edge_detect.py <image_path> [roi_json]"}))
+    # Parse --max-size from argv before positional args
+    max_size = None
+    argv = list(sys.argv[1:])
+    if "--max-size" in argv:
+        idx = argv.index("--max-size")
+        if idx + 1 < len(argv):
+            max_size = int(argv[idx + 1])
+            argv = argv[:idx] + argv[idx + 2:]
+        else:
+            argv = argv[:idx]
+
+    if len(argv) < 1:
+        print(json.dumps({"error": "Usage: edge_detect.py <image_path> [roi_json] [epsilon] [--max-size N]"}))
         sys.exit(1)
 
-    image_path = sys.argv[1]
+    image_path = argv[0]
     roi = None
-    if len(sys.argv) >= 3:
+    if len(argv) >= 2:
         try:
-            roi = json.loads(sys.argv[2])
+            roi = json.loads(argv[1])
         except json.JSONDecodeError:
-            print(json.dumps({"error": f"Invalid ROI JSON: {sys.argv[2]}"}))
+            print(json.dumps({"error": f"Invalid ROI JSON: {argv[1]}"}))
             sys.exit(1)
 
     epsilon = 0.005
-    if len(sys.argv) >= 4:
-        epsilon = float(sys.argv[3])
+    if len(argv) >= 3:
+        epsilon = float(argv[2])
 
-    result = detect_edges(image_path, roi, epsilon)
+    result = detect_edges(image_path, roi, epsilon, max_size)
     print(json.dumps(result))

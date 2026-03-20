@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { getDb } from '../db.js';
 import { runAnalysisPipeline } from '../services/analyze.js';
 import { detectEdges } from '../services/opencv.js';
+import { runAnalysisStream } from '../services/analyzeStream.js';
 import { UPLOAD_DIR } from './photos.js';
 
 const router = Router();
@@ -39,6 +40,38 @@ router.post('/:id/analyze', async (req, res) => {
       error: err.message || 'Analysis failed',
     });
   }
+});
+
+// GET /api/projects/:id/analyze-stream
+router.get('/:id/analyze-stream', async (req, res) => {
+  const db = getDb();
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const photos = db.prepare(
+    'SELECT * FROM photos WHERE project_id = ?'
+  ).all(req.params.id);
+
+  if (photos.length === 0) {
+    res.status(400).json({ error: 'No photos in project' });
+    return;
+  }
+
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Handle client disconnect
+  req.on('close', () => {
+    res.end();
+  });
+
+  await runAnalysisStream(res, parseInt(req.params.id));
 });
 
 // POST /api/projects/:projectId/photos/:photoId/auto-contour

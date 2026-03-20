@@ -65,6 +65,13 @@ export const updatePhoto = (projectId: number, photoId: number, data: Record<str
 export const deletePhoto = (projectId: number, photoId: number) =>
   apiFetch<{ deleted: boolean }>(`/api/projects/${projectId}/photos/${photoId}`, { method: 'DELETE' });
 
+// Apply scale to all photos in project
+export const applyScaleToAll = (projectId: number, scaleData: any) =>
+  apiFetch<{ updated: number }>(`/api/projects/${projectId}/apply-scale`, {
+    method: 'PATCH',
+    body: JSON.stringify({ scale_data: scaleData }),
+  });
+
 // Auto contour detection
 export const autoContour = (projectId: number, photoId: number, roi?: any) =>
   apiFetch<any>(`/api/projects/${projectId}/photos/${photoId}/auto-contour`, {

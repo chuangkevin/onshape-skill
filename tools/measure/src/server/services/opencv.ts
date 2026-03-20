@@ -1,10 +1,13 @@
 import { execFile } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 import type { OpenCVResult } from '@shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT_PATH = resolve(__dirname, '../python/edge_detect.py');
+
+const IS_WINDOWS = process.platform === 'win32';
 
 let pythonAvailable: boolean | null = null;
 let pythonCommand = 'python';
@@ -15,27 +18,79 @@ export function resetPythonCheck(): void {
   pythonCommand = 'python';
 }
 
+/** Resolve a command name to its full path using where/which */
+async function resolveFullPath(cmd: string): Promise<string | null> {
+  const whichCmd = IS_WINDOWS ? 'where' : 'which';
+  try {
+    const result = await runCommand(whichCmd, [cmd]);
+    if (result.exitCode === 0) {
+      // 'where' on Windows may return multiple lines; take the first
+      const fullPath = result.stdout.trim().split(/\r?\n/)[0];
+      if (fullPath) return fullPath;
+    }
+  } catch {
+    // not found
+  }
+  return null;
+}
+
 /** Check if Python + OpenCV are available */
 export async function checkPython(): Promise<boolean> {
   if (pythonAvailable !== null) return pythonAvailable;
 
-  for (const cmd of ['python', 'python3']) {
+  // Build ordered list of candidate Python paths
+  const candidates: string[] = [];
+
+  // 1. PYTHON_PATH env var (for Docker / explicit config)
+  if (process.env.PYTHON_PATH) {
+    candidates.push(process.env.PYTHON_PATH);
+  }
+
+  // 2. Resolve full paths via where/which
+  if (IS_WINDOWS) {
+    const resolved = await resolveFullPath('python');
+    if (resolved) candidates.push(resolved);
+  } else {
+    for (const name of ['python3', 'python']) {
+      const resolved = await resolveFullPath(name);
+      if (resolved) candidates.push(resolved);
+    }
+  }
+
+  // 3. Common fallback paths (Linux / macOS)
+  if (!IS_WINDOWS) {
+    for (const p of ['/usr/bin/python3', '/usr/local/bin/python3']) {
+      if (existsSync(p)) candidates.push(p);
+    }
+  }
+
+  // De-duplicate while preserving order
+  const seen = new Set<string>();
+  const uniqueCandidates = candidates.filter((c) => {
+    if (seen.has(c)) return false;
+    seen.add(c);
+    return true;
+  });
+
+  // Try each candidate
+  for (const cmd of uniqueCandidates) {
     try {
       const result = await runCommand(cmd, ['-c', 'import cv2; print(cv2.__version__)']);
       if (result.exitCode === 0) {
         pythonCommand = cmd;
         pythonAvailable = true;
-        console.log(`Python OpenCV available: ${cmd} (cv2 ${result.stdout.trim()})`);
+        console.log(`Python detected at: ${cmd}`);
+        console.log(`Python OpenCV available (cv2 ${result.stdout.trim()})`);
         return true;
       }
     } catch {
-      // Try next command
+      // Try next candidate
     }
   }
 
   pythonAvailable = false;
   console.warn(
-    'Python + OpenCV not available. Install with: pip install opencv-python numpy',
+    'Python NOT detected. Install Python + OpenCV with: pip install opencv-python numpy',
   );
   return false;
 }
@@ -54,6 +109,7 @@ export async function detectEdges(
   const args = [SCRIPT_PATH, imagePath];
   if (roi) args.push(JSON.stringify(roi));
   if (epsilon !== undefined) args.push(String(epsilon));
+  args.push('--max-size', '1024');
 
   const result = await runCommand(pythonCommand, args);
 

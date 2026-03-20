@@ -29,6 +29,20 @@ const projectNameEl = document.getElementById('projectName') as HTMLSpanElement;
 const toolHint = document.getElementById('toolHint') as HTMLDivElement;
 const analysisResults = document.getElementById('analysisResults') as HTMLDivElement;
 
+// ── Mode & Wizard DOM Elements ──
+const modeSelector = document.getElementById('modeSelector') as HTMLDivElement;
+const modeToggleBtn = document.getElementById('modeToggle') as HTMLButtonElement;
+const rememberModeCheckbox = document.getElementById('rememberMode') as HTMLInputElement;
+const wizardOverlay = document.getElementById('wizardOverlay') as HTMLDivElement;
+const wizardBody = document.getElementById('wizardBody') as HTMLDivElement;
+const wizPrevBtn = document.getElementById('wizPrev') as HTMLButtonElement;
+const wizSkipBtn = document.getElementById('wizSkip') as HTMLButtonElement;
+const wizNextBtn = document.getElementById('wizNext') as HTMLButtonElement;
+
+// ── Mode & Wizard State ──
+let currentMode: 'wizard' | 'free' = 'free';
+let wizardStep = 1;
+
 // ── Tool hints (Traditional Chinese) ──
 const TOOL_HINTS: Record<string, string> = {
   select: '點擊選取圖形，按 Delete 刪除',
@@ -52,6 +66,12 @@ photoLayer.attachEvents(drawingCanvas);
 // Auto-advance when state changes
 store.subscribe(() => {
   autoAdvance();
+  // Wizard auto-advance based on state
+  const photo = store.getActivePhoto();
+  const state = store.getState();
+  if (state.photos.length > 0) wizardAutoAdvance(1);
+  if (photo?.scale) wizardAutoAdvance(2);
+  if (photo && photo.drawings.length > 0) wizardAutoAdvance(3);
 });
 
 // ── Tool Management ──
@@ -109,6 +129,11 @@ function showToolHint(tool: string): void {
     toolHint.classList.add('hidden');
   }
 }
+
+// ── Angle icons ──
+const ANGLE_ICONS: Record<string, string> = {
+  top: '⬆', side: '➡', front: '⬇', back: '⬅', 'close-up': '🔍',
+};
 
 // ── Rendering ──
 function renderDrawings(): void {
@@ -169,9 +194,29 @@ function autoAdvance(): void {
   const photo = store.getActivePhoto();
   const currentTool = store.getState().activeTool;
 
-  // After scale calibration → auto-detect contour then switch to polyline
+  // After scale calibration → ask to apply to all, then auto-detect contour then switch to polyline
   if (step === 3 && currentTool === 'scale' && photo?.scale) {
     setTimeout(async () => {
+      // Ask user whether to apply scale to all photos in this project
+      const projectId = store.getState().projectId;
+      if (projectId && store.getState().photos.length > 1 && photo.scale) {
+        if (confirm('是否將此比例尺套用到同專案的所有照片？')) {
+          try {
+            const result = await api.applyScaleToAll(projectId, photo.scale);
+            // Update local state for all photos
+            const photos = store.getState().photos.map((p) => ({
+              ...p,
+              scale: photo.scale,
+            }));
+            store.setPhotos(photos);
+            toolHint.textContent = `比例尺已套用到 ${result.updated} 張照片`;
+            toolHint.classList.remove('hidden');
+          } catch (err) {
+            console.warn('Apply scale to all failed:', err);
+          }
+        }
+      }
+
       showToolHint('scale'); // Update hint
       toolHint.textContent = '比例尺已校準！正在自動偵測輪廓...';
       toolHint.classList.remove('hidden');
@@ -238,7 +283,7 @@ function renderUI(): void {
       (p, i) => `
     <div class="photo-thumb ${i === state.activePhotoIndex ? 'active' : ''}" data-index="${i}">
       <img src="/uploads/${p.filename}" alt="${p.originalName}" />
-      <span>${p.originalName}</span>
+      <span>${ANGLE_ICONS[p.angle] || '⬆'} ${p.originalName}</span>
     </div>
   `)
     .join('');
@@ -276,6 +321,13 @@ function renderUI(): void {
   }
 
   updateGuide();
+
+  // Keep wizard in sync with current mode
+  if (currentMode === 'wizard') {
+    wizardOverlay.classList.remove('hidden');
+  } else {
+    wizardOverlay.classList.add('hidden');
+  }
 }
 
 // ── Canvas Sizing ──
@@ -539,12 +591,183 @@ function setupEvents(): void {
   window.addEventListener('resize', resizeCanvases);
 }
 
+// ── Mode Selector Logic ──
+function applyMode(mode: 'wizard' | 'free'): void {
+  currentMode = mode;
+  modeSelector.classList.add('hidden');
+
+  if (mode === 'wizard') {
+    wizardOverlay.classList.remove('hidden');
+    modeToggleBtn.textContent = '切換至自由模式';
+    updateWizard();
+  } else {
+    wizardOverlay.classList.add('hidden');
+    modeToggleBtn.textContent = '切換至引導模式';
+  }
+}
+
+function showModeSelector(): void {
+  modeSelector.classList.remove('hidden');
+}
+
+function setupModeEvents(): void {
+  // Mode card clicks
+  document.querySelectorAll('.mode-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      const mode = (card as HTMLElement).dataset.mode as 'wizard' | 'free';
+      if (rememberModeCheckbox.checked) {
+        localStorage.setItem('measureMode', mode);
+      }
+      applyMode(mode);
+    });
+  });
+
+  // Mode toggle button in header
+  modeToggleBtn.addEventListener('click', () => {
+    const newMode = currentMode === 'wizard' ? 'free' : 'wizard';
+    const saved = localStorage.getItem('measureMode');
+    if (saved) {
+      localStorage.setItem('measureMode', newMode);
+    }
+    applyMode(newMode);
+  });
+}
+
+// ── Wizard Logic ──
+const WIZARD_INSTRUCTIONS: Record<number, string> = {
+  1: '拖曳照片到下方區域，或點擊「+ 新增照片」',
+  2: '在照片中的尺規上點擊兩個刻度點，然後輸入實際距離（mm）',
+  3: '沿零件邊緣逐點點擊描繪輪廓，按 Enter 結束',
+  4: '（選填）用圓孔工具標記螺絲孔，或在右側輸入卡尺尺寸。完成後點「下一步」',
+  5: '點擊「開始 AI 分析」，完成後可匯出 JSON',
+};
+
+function updateWizard(): void {
+  if (currentMode !== 'wizard') return;
+
+  // Update step highlights
+  document.querySelectorAll('.wiz-step').forEach((el) => {
+    const step = parseInt((el as HTMLElement).dataset.wstep || '0');
+    el.classList.remove('active', 'done');
+    if (step < wizardStep) el.classList.add('done');
+    else if (step === wizardStep) el.classList.add('active');
+  });
+
+  // Update body content
+  let bodyHtml = `<p>${WIZARD_INSTRUCTIONS[wizardStep]}</p>`;
+  if (wizardStep === 5) {
+    bodyHtml += `<button type="button" class="tool-btn primary" id="wizAnalyzeBtn" style="margin-top:8px;">開始 AI 分析</button>`;
+  }
+  wizardBody.innerHTML = bodyHtml;
+
+  // Wire up inline analyze button for step 5
+  if (wizardStep === 5) {
+    const wizAnalyzeBtn = document.getElementById('wizAnalyzeBtn');
+    wizAnalyzeBtn?.addEventListener('click', () => {
+      document.getElementById('analyzeBtn')!.click();
+    });
+  }
+
+  // Auto-activate relevant tools
+  if (wizardStep === 2) {
+    activateTool('scale', true);
+    renderUI();
+  } else if (wizardStep === 3) {
+    activateTool('polyline', true);
+    renderUI();
+  }
+
+  // Update nav button states
+  wizPrevBtn.disabled = wizardStep <= 1;
+  wizPrevBtn.style.opacity = wizardStep <= 1 ? '0.4' : '1';
+}
+
+function wizardAdvanceWithCheck(): void {
+  const photo = store.getActivePhoto();
+  const state = store.getState();
+
+  // Validate current step completion
+  if (wizardStep === 1 && state.photos.length === 0) {
+    alert('請先上傳至少一張照片');
+    return;
+  }
+  if (wizardStep === 2 && !photo?.scale) {
+    alert('請先完成比例尺校準');
+    return;
+  }
+  if (wizardStep === 3 && (!photo || photo.drawings.length === 0)) {
+    alert('請先描繪至少一個輪廓');
+    return;
+  }
+
+  if (wizardStep < 5) {
+    wizardStep++;
+    updateWizard();
+  }
+}
+
+function showWizardCheckmark(): void {
+  // Show brief green checkmark animation on the current step element
+  const stepEl = document.querySelector(`.wiz-step[data-wstep="${wizardStep}"]`);
+  if (stepEl) {
+    const check = document.createElement('span');
+    check.className = 'wiz-check-anim';
+    check.textContent = '\u2714';
+    stepEl.appendChild(check);
+    setTimeout(() => check.remove(), 800);
+  }
+}
+
+/** Called when a wizard-relevant action completes (photo upload, scale set, contour drawn) */
+function wizardAutoAdvance(completedStep: number): void {
+  if (currentMode !== 'wizard') return;
+  if (wizardStep !== completedStep) return;
+
+  showWizardCheckmark();
+  setTimeout(() => {
+    if (wizardStep < 5) {
+      wizardStep++;
+      updateWizard();
+    }
+  }, 600);
+}
+
+function setupWizardEvents(): void {
+  wizPrevBtn.addEventListener('click', () => {
+    if (wizardStep > 1) {
+      wizardStep--;
+      updateWizard();
+    }
+  });
+
+  wizSkipBtn.addEventListener('click', () => {
+    if (wizardStep < 5) {
+      wizardStep++;
+      updateWizard();
+    }
+  });
+
+  wizNextBtn.addEventListener('click', () => {
+    wizardAdvanceWithCheck();
+  });
+}
+
 // ── Init ──
 async function init(): Promise<void> {
   resizeCanvases();
   setupEvents();
+  setupModeEvents();
+  setupWizardEvents();
   activateTool('select');
   renderUI();
+
+  // Check saved mode preference
+  const savedMode = localStorage.getItem('measureMode') as 'wizard' | 'free' | null;
+  if (savedMode) {
+    applyMode(savedMode);
+  } else {
+    showModeSelector();
+  }
 
   // Load existing project (skip garbled names)
   const projects = await api.listProjects();
