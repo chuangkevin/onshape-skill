@@ -32,10 +32,10 @@ const analysisResults = document.getElementById('analysisResults') as HTMLDivEle
 // ── Tool hints (Traditional Chinese) ──
 const TOOL_HINTS: Record<string, string> = {
   select: '點擊選取圖形，按 Delete 刪除',
-  polyline: '逐點點擊描繪輪廓，按 Enter 或雙擊結束',
+  polyline: '沿零件邊緣逐點點擊，按 Enter 或雙擊結束封閉輪廓',
   arc: '依序點擊起點、中點、終點繪製弧線',
-  hole: '點擊圓心位置，輸入半徑',
-  scale: '在尺規上點擊兩點，輸入實際距離（mm）',
+  hole: '在圓孔中心按住拖曳到邊緣，自動計算半徑',
+  scale: '第一步：在照片中的尺規上點擊兩個刻度點',
 };
 
 const TOOL_NAMES: Record<string, string> = {
@@ -48,6 +48,11 @@ const drawingLayer = new DrawingLayer(drawingCanvas, photoLayer);
 
 // Attach pan/zoom events to drawingCanvas (the top layer that receives events)
 photoLayer.attachEvents(drawingCanvas);
+
+// Auto-advance when state changes
+store.subscribe(() => {
+  autoAdvance();
+});
 
 // ── Tool Management ──
 let cleanupTool: (() => void) | null = null;
@@ -77,13 +82,14 @@ function activateTool(tool: ToolType): void {
   showToolHint(tool);
 }
 
+let hintTimer: ReturnType<typeof setTimeout> | null = null;
 function showToolHint(tool: string): void {
   const hint = TOOL_HINTS[tool];
-  if (hint && tool !== 'select') {
+  if (hintTimer) clearTimeout(hintTimer);
+  if (hint) {
     toolHint.textContent = hint;
     toolHint.classList.remove('hidden');
-    // Auto-hide after 4 seconds
-    setTimeout(() => toolHint.classList.add('hidden'), 4000);
+    hintTimer = setTimeout(() => toolHint.classList.add('hidden'), 6000);
   } else {
     toolHint.classList.add('hidden');
   }
@@ -99,16 +105,18 @@ function renderDrawings(): void {
   );
 }
 
-function updateGuide(): void {
+function getCurrentStep(): number {
   const state = store.getState();
   const photo = store.getActivePhoto();
-  const steps = document.querySelectorAll('.guide-step');
+  if (state.photos.length === 0) return 1;
+  if (!photo?.scale) return 2;
+  if (photo.drawings.length === 0) return 3;
+  return 4; // features or ready to analyze
+}
 
-  let currentStep = 1;
-  if (state.photos.length > 0) currentStep = 2;
-  if (photo?.scale) currentStep = 3;
-  if (photo && photo.drawings.length > 0) currentStep = 4;
-  // Step 5 is always available once you have drawings
+function updateGuide(): void {
+  const currentStep = getCurrentStep();
+  const steps = document.querySelectorAll('.guide-step');
 
   steps.forEach((el) => {
     const step = parseInt((el as HTMLElement).dataset.step || '0');
@@ -116,6 +124,43 @@ function updateGuide(): void {
     if (step < currentStep) el.classList.add('done');
     else if (step === currentStep) el.classList.add('active');
   });
+
+  // Show next-step button in the guide
+  const nextStepActions: Record<number, { label: string; action: () => void }> = {
+    2: { label: '開始校準比例尺', action: () => { activateTool('scale'); renderUI(); } },
+    3: { label: '開始描繪輪廓', action: () => { activateTool('polyline'); renderUI(); } },
+    4: { label: '進行 AI 分析', action: () => document.getElementById('analyzeBtn')!.click() },
+  };
+
+  const existing = document.getElementById('nextStepBtn');
+  if (existing) existing.remove();
+
+  const next = nextStepActions[currentStep];
+  if (next) {
+    const btn = document.createElement('button');
+    btn.id = 'nextStepBtn';
+    btn.type = 'button';
+    btn.className = 'action-btn primary';
+    btn.style.marginTop = '8px';
+    btn.textContent = `>>> ${next.label}`;
+    btn.addEventListener('click', next.action);
+    document.getElementById('guidePanel')!.appendChild(btn);
+  }
+}
+
+/** Auto-advance tool after completing a step */
+function autoAdvance(): void {
+  const step = getCurrentStep();
+  const photo = store.getActivePhoto();
+  const currentTool = store.getState().activeTool;
+
+  // After scale calibration → switch to polyline
+  if (step === 3 && currentTool === 'scale' && photo?.scale) {
+    setTimeout(() => {
+      activateTool('polyline');
+      renderUI();
+    }, 300);
+  }
 }
 
 function renderUI(): void {
@@ -220,6 +265,12 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
   store.setPhotos(photos);
   await loadPhoto(photos[photos.length - 1]);
   renderUI();
+
+  // Auto-advance: switch to scale tool after first upload
+  setTimeout(() => {
+    activateTool('scale');
+    renderUI();
+  }, 500);
 }
 
 // ── AI Analysis Display ──

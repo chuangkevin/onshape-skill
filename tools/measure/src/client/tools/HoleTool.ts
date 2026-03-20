@@ -4,6 +4,7 @@ import type { DrawingLayer } from '../canvas/DrawingLayer.js';
 import { store } from '../state/store.js';
 
 let centerPoint: Point | null = null;
+let isDragging = false;
 let idCounter = 0;
 
 export function activateHoleTool(
@@ -13,70 +14,99 @@ export function activateHoleTool(
   renderFn: () => void,
 ): () => void {
   centerPoint = null;
+  isDragging = false;
 
-  const onClick = (e: MouseEvent) => {
+  const onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     if (photoLayer.isPanningNow) return;
+
     const rect = drawingCanvas.getBoundingClientRect();
-    const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const imgPt = photoLayer.screenToImage(screenPt.x, screenPt.y);
+    centerPoint = photoLayer.screenToImage(e.clientX - rect.left, e.clientY - rect.top);
+    isDragging = true;
+    drawingCanvas.setPointerCapture(e.pointerId);
+  };
 
-    centerPoint = imgPt;
-    drawingLayer.setActivePoints([imgPt]);
-    renderFn();
+  const onPointerMove = (e: PointerEvent) => {
+    if (!isDragging || !centerPoint) return;
+    const rect = drawingCanvas.getBoundingClientRect();
+    const current = photoLayer.screenToImage(e.clientX - rect.left, e.clientY - rect.top);
+    const dx = current.x - centerPoint.x;
+    const dy = current.y - centerPoint.y;
+    const radius_px = Math.sqrt(dx * dx + dy * dy);
 
-    // Prompt for radius
+    // Live preview
     const photo = store.getActivePhoto();
-    const unit = photo?.scale ? 'mm' : 'px';
-    const radiusStr = prompt(`請輸入圓孔半徑（${unit}）：`);
+    const tempShape: CircleShape = {
+      type: 'circle', id: '_preview', center_px: centerPoint, radius_px,
+    };
+    drawingLayer.render([...photo!.drawings, tempShape],
+      photo?.scale ? { px_per_mm: photo.scale.px_per_mm } : undefined);
+  };
 
-    if (radiusStr) {
-      const radius = parseFloat(radiusStr);
-      if (radius > 0) {
-        const radius_px = photo?.scale
-          ? radius * photo.scale.px_per_mm
-          : radius;
+  const onPointerUp = (e: PointerEvent) => {
+    if (!isDragging || !centerPoint) return;
+    isDragging = false;
 
-        const shape: CircleShape = {
-          type: 'circle',
-          id: `hole_${Date.now()}_${idCounter}`,
-          center_px: imgPt,
-          radius_px,
-        };
+    const rect = drawingCanvas.getBoundingClientRect();
+    const endPt = photoLayer.screenToImage(e.clientX - rect.left, e.clientY - rect.top);
+    const dx = endPt.x - centerPoint.x;
+    const dy = endPt.y - centerPoint.y;
+    const radius_px = Math.sqrt(dx * dx + dy * dy);
 
-        const feature: FeatureAnnotation = {
-          id: `feat_${Date.now()}_${idCounter++}`,
-          type: 'hole',
-          label: `圓孔（r=${radius}${unit}）`,
-          shape,
-          dimension_mm: photo?.scale ? radius : undefined,
-        };
-
-        store.addDrawing(shape);
-        store.addFeature(feature);
-      }
+    if (radius_px < 3) {
+      // Too small — ignore
+      centerPoint = null;
+      renderFn();
+      return;
     }
 
+    const photo = store.getActivePhoto();
+    const radius_mm = photo?.scale ? radius_px / photo.scale.px_per_mm : null;
+    const label = radius_mm
+      ? `圓孔（r=${radius_mm.toFixed(1)}mm）`
+      : `圓孔（r=${radius_px.toFixed(0)}px）`;
+
+    const shape: CircleShape = {
+      type: 'circle',
+      id: `hole_${Date.now()}_${idCounter}`,
+      center_px: centerPoint,
+      radius_px,
+    };
+
+    const feature: FeatureAnnotation = {
+      id: `feat_${Date.now()}_${idCounter++}`,
+      type: 'hole',
+      label,
+      shape,
+      dimension_mm: radius_mm ?? undefined,
+    };
+
+    store.addDrawing(shape);
+    store.addFeature(feature);
     centerPoint = null;
-    drawingLayer.clearActive();
     renderFn();
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       centerPoint = null;
+      isDragging = false;
       drawingLayer.clearActive();
       renderFn();
     }
   };
 
-  drawingCanvas.addEventListener('click', onClick);
+  drawingCanvas.addEventListener('pointerdown', onPointerDown);
+  drawingCanvas.addEventListener('pointermove', onPointerMove);
+  drawingCanvas.addEventListener('pointerup', onPointerUp);
   window.addEventListener('keydown', onKeyDown);
 
   return () => {
-    drawingCanvas.removeEventListener('click', onClick);
+    drawingCanvas.removeEventListener('pointerdown', onPointerDown);
+    drawingCanvas.removeEventListener('pointermove', onPointerMove);
+    drawingCanvas.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('keydown', onKeyDown);
     centerPoint = null;
-    drawingLayer.clearActive();
+    isDragging = false;
   };
 }
