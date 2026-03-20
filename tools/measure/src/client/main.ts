@@ -265,6 +265,75 @@ async function tryAutoContour(): Promise<void> {
   }
 }
 
+// ── Auto-Analysis (SSE) ──
+let autoAnalysisResults: any = null;
+
+function startAutoAnalysis(projectId: number, photoId: number): void {
+  autoAnalysisResults = null;
+
+  const es = new EventSource(`/api/projects/${projectId}/photos/${photoId}/auto-analyze`);
+
+  // Update wizard body with progress
+  const updateProgress = (data: any) => {
+    if (currentMode !== 'wizard') return;
+    const statusIcons: Record<string, string> = { running: '⏳', done: '✅', error: '❌' };
+    const stepNames: Record<string, string> = { ruler: '尺規偵測', contour: '輪廓偵測', labels: '標籤辨識' };
+
+    // Build progress HTML
+    let html = '<div style="text-align:left;display:inline-block;">';
+    for (const [key, name] of Object.entries(stepNames)) {
+      const status = (data._statuses?.[key]) || 'waiting';
+      const icon = statusIcons[status] || '⏳';
+      html += `<div>${icon} ${name}</div>`;
+    }
+    html += '</div>';
+
+    const body = document.getElementById('wizardBody');
+    if (body && wizardStep === 1) {
+      body.innerHTML = `<p>AI 正在分析照片...</p>${html}`;
+    }
+  };
+
+  const statuses: Record<string, string> = {};
+
+  es.addEventListener('step', (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    statuses[data.step] = data.status;
+
+    if (data.step === 'ruler' && data.status === 'done') {
+      autoAnalysisResults = { ...autoAnalysisResults, ruler: data.result };
+    }
+    if (data.step === 'contour' && data.status === 'done') {
+      autoAnalysisResults = { ...autoAnalysisResults, contour: data.result };
+    }
+    if (data.step === 'labels' && data.status === 'done') {
+      autoAnalysisResults = { ...autoAnalysisResults, labels: data.result };
+    }
+
+    if (data.step === 'complete' && data.status === 'done') {
+      es.close();
+      autoAnalysisResults = { ...autoAnalysisResults, ...data.result };
+
+      // Auto-advance wizard to step 2
+      if (currentMode === 'wizard' && wizardStep === 1) {
+        wizardStep = 2;
+        updateWizard();
+      }
+      return;
+    }
+
+    updateProgress({ _statuses: statuses });
+  });
+
+  es.onerror = () => {
+    es.close();
+    if (currentMode === 'wizard' && wizardStep === 1) {
+      wizardStep = 2;
+      updateWizard();
+    }
+  };
+}
+
 function renderUI(): void {
   const state = store.getState();
   const photo = store.getActivePhoto();
@@ -375,11 +444,16 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
   await loadPhoto(photos[photos.length - 1]);
   renderUI();
 
-  // Auto-advance: switch to scale tool after first upload
-  setTimeout(() => {
-    activateTool('scale');
-    renderUI();
-  }, 500);
+  // In wizard mode: start auto-analysis; in free mode: switch to scale tool
+  const photo = store.getActivePhoto();
+  if (currentMode === 'wizard' && photo && store.getState().projectId) {
+    startAutoAnalysis(store.getState().projectId!, photo.id);
+  } else {
+    setTimeout(() => {
+      activateTool('scale');
+      renderUI();
+    }, 500);
+  }
 }
 
 // ── AI Analysis Display ──
@@ -597,6 +671,12 @@ function applyMode(mode: 'wizard' | 'free'): void {
   currentMode = mode;
   modeSelector.classList.add('hidden');
 
+  // Hide guide section in wizard mode (Tasks 6.1-6.3)
+  const guideSection = document.getElementById('guideSection');
+  if (guideSection) {
+    guideSection.style.display = mode === 'wizard' ? 'none' : '';
+  }
+
   if (mode === 'wizard') {
     wizardOverlay.classList.remove('hidden');
     modeToggleBtn.textContent = '切換至自由模式';
@@ -636,11 +716,11 @@ function setupModeEvents(): void {
 
 // ── Wizard Logic ──
 const WIZARD_INSTRUCTIONS: Record<number, string> = {
-  1: '拖曳照片到下方區域，或點擊「+ 新增照片」',
-  2: '在照片中的尺規上點擊兩個刻度點，然後輸入實際距離（mm）',
-  3: '沿零件邊緣逐點點擊描繪輪廓，按 Enter 結束',
-  4: '（選填）用圓孔工具標記螺絲孔，或在右側輸入卡尺尺寸。完成後點「下一步」',
-  5: '點擊「開始 AI 分析」，完成後可匯出 JSON',
+  1: '拖曳照片到下方區域，上傳後自動開始 AI 分析...',
+  2: 'AI 偵測到的比例尺如下，請確認或手動覆蓋',
+  3: 'AI 偵測到的輪廓如下，請確認、微調或重繪',
+  4: '（選填）補充圓孔等特徵，或輸入卡尺尺寸',
+  5: '確認無誤後，點擊匯出 JSON',
 };
 
 function updateWizard(): void {
@@ -654,28 +734,109 @@ function updateWizard(): void {
     else if (step === wizardStep) el.classList.add('active');
   });
 
-  // Update body content
+  // Update body content per step
   let bodyHtml = `<p>${WIZARD_INSTRUCTIONS[wizardStep]}</p>`;
-  if (wizardStep === 5) {
-    bodyHtml += `<button type="button" class="tool-btn primary" id="wizAnalyzeBtn" style="margin-top:8px;">開始 AI 分析</button>`;
+
+  if (wizardStep === 2) {
+    const ruler = autoAnalysisResults?.ruler;
+    if (ruler?.found) {
+      bodyHtml = `
+        <p>偵測到尺規：<strong>${ruler.point_a.label} ~ ${ruler.point_b.label}</strong></p>
+        <p>建議比例尺：<strong>${ruler.px_per_mm.toFixed(2)} px/mm</strong></p>
+        <div style="margin-top:12px;">
+          <button type="button" class="tool-btn primary" id="wizConfirmScale">確認使用</button>
+          <button type="button" class="tool-btn" id="wizManualScale">手動校準</button>
+        </div>`;
+    } else {
+      bodyHtml = `
+        <p>未偵測到尺規，請手動校準比例尺</p>
+        <p style="color:#8b949e;">在照片中的尺規上點擊兩個刻度點</p>`;
+      activateTool('scale', true);
+    }
+  } else if (wizardStep === 3) {
+    const contour = autoAnalysisResults?.contour;
+    const hasContour = contour?.contours?.length > 0;
+
+    if (hasContour) {
+      // Show AI contour on canvas
+      const largest = contour.contours[0];
+      const points = largest.contour_px;
+      const photo = store.getActivePhoto();
+      const hasAutoContour = photo?.drawings.some((d: any) => d.id === 'auto_contour');
+      if (!hasAutoContour && points.length >= 3) {
+        store.addDrawing({
+          type: 'polyline',
+          id: 'auto_contour',
+          points_px: points,
+          closed: true,
+        });
+        renderDrawings();
+      }
+
+      bodyHtml = `
+        <p>偵測到 ${points.length} 點輪廓（綠色線條）</p>
+        <div style="margin-top:12px;">
+          <button type="button" class="tool-btn primary" id="wizConfirmContour">確認輪廓</button>
+          <button type="button" class="tool-btn" id="wizEditContour">微調</button>
+          <button type="button" class="tool-btn" id="wizRedrawContour">重繪</button>
+        </div>`;
+    } else {
+      bodyHtml = `
+        <p>未偵測到輪廓，請手動描繪</p>
+        <p style="color:#8b949e;">沿零件邊緣逐點點擊，按 Enter 結束</p>`;
+      activateTool('polyline', true);
+    }
+  } else if (wizardStep === 5) {
+    bodyHtml = `
+      <p>確認無誤後，點擊匯出</p>
+      <div style="margin-top:12px;">
+        <button type="button" class="tool-btn primary" id="wizExportBtn">匯出 JSON</button>
+        <button type="button" class="tool-btn" id="wizCopyBtn">複製 JSON</button>
+      </div>`;
   }
+
   wizardBody.innerHTML = bodyHtml;
 
-  // Wire up inline analyze button for step 5
-  if (wizardStep === 5) {
-    const wizAnalyzeBtn = document.getElementById('wizAnalyzeBtn');
-    wizAnalyzeBtn?.addEventListener('click', () => {
-      document.getElementById('analyzeBtn')!.click();
-    });
-  }
-
-  // Auto-activate relevant tools
+  // Wire up step-specific buttons after innerHTML is set
   if (wizardStep === 2) {
-    activateTool('scale', true);
-    renderUI();
+    document.getElementById('wizConfirmScale')?.addEventListener('click', () => {
+      const ruler = autoAnalysisResults?.ruler;
+      if (ruler?.found) {
+        store.setScale({
+          pointA_px: { x: ruler.point_a.px_x, y: ruler.point_a.px_y },
+          pointB_px: { x: ruler.point_b.px_x, y: ruler.point_b.px_y },
+          distance_mm: ruler.distance_mm,
+          px_per_mm: ruler.px_per_mm,
+        });
+        wizardStep = 3;
+        updateWizard();
+        renderUI();
+      }
+    });
+    document.getElementById('wizManualScale')?.addEventListener('click', () => {
+      activateTool('scale', true);
+    });
   } else if (wizardStep === 3) {
-    activateTool('polyline', true);
-    renderUI();
+    document.getElementById('wizConfirmContour')?.addEventListener('click', () => {
+      wizardStep = 4;
+      updateWizard();
+      renderUI();
+    });
+    document.getElementById('wizEditContour')?.addEventListener('click', () => {
+      activateTool('polyline', true);
+    });
+    document.getElementById('wizRedrawContour')?.addEventListener('click', () => {
+      store.removeDrawing('auto_contour');
+      renderDrawings();
+      activateTool('polyline', true);
+    });
+  } else if (wizardStep === 5) {
+    document.getElementById('wizExportBtn')?.addEventListener('click', () => {
+      document.getElementById('exportBtn')!.click();
+    });
+    document.getElementById('wizCopyBtn')?.addEventListener('click', () => {
+      document.getElementById('copyJsonBtn')!.click();
+    });
   }
 
   // Update nav button states

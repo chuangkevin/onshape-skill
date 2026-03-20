@@ -4,6 +4,7 @@ import { getDb } from '../db.js';
 import { runAnalysisPipeline } from '../services/analyze.js';
 import { detectEdges } from '../services/opencv.js';
 import { runAnalysisStream } from '../services/analyzeStream.js';
+import { runAutoAnalysis } from '../services/autoAnalyze.js';
 import { UPLOAD_DIR } from './photos.js';
 
 const router = Router();
@@ -72,6 +73,32 @@ router.get('/:id/analyze-stream', async (req, res) => {
   });
 
   await runAnalysisStream(res, parseInt(req.params.id));
+});
+
+// POST /api/projects/:projectId/photos/:photoId/auto-analyze
+router.post('/:projectId/photos/:photoId/auto-analyze', async (req, res) => {
+  const db = getDb();
+  const photo: any = db.prepare(
+    'SELECT * FROM photos WHERE id = ? AND project_id = ?'
+  ).get(req.params.photoId, req.params.projectId);
+
+  if (!photo) {
+    res.status(404).json({ error: 'Photo not found' });
+    return;
+  }
+
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Handle client disconnect
+  req.on('close', () => {
+    res.end();
+  });
+
+  await runAutoAnalysis(res, parseInt(req.params.projectId), photo.id);
 });
 
 // POST /api/projects/:projectId/photos/:photoId/auto-contour

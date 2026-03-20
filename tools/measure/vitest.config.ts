@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     root: '.',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts'],
+    exclude: ['tests/e2e/**'],
   },
 });

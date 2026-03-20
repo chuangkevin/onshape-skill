@@ -89,3 +89,8 @@ export const exportMeasurement = (projectId: number, path?: string) =>
     method: 'POST',
     body: JSON.stringify({ path }),
   });
+
+// Auto-analyze (SSE stream)
+export function autoAnalyzeStream(projectId: number, photoId: number): EventSource {
+  return new EventSource(`/api/projects/${projectId}/photos/${photoId}/auto-analyze`);
+}
