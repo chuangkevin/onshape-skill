@@ -73,13 +73,14 @@ function renderUI(): void {
   const photo = store.getActivePhoto();
 
   // Project name
-  projectName.textContent = state.projectName || 'No project';
+  projectName.textContent = state.projectName || '尚無專案';
 
   // Tool buttons
   document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {
     btn.classList.toggle('active', (btn as HTMLElement).dataset.tool === state.activeTool);
   });
-  statusTool.textContent = `Tool: ${state.activeTool}`;
+  const toolNames: Record<string, string> = { select: '選取', polyline: '多邊形', arc: '弧線', hole: '圓孔', scale: '比例尺' };
+  statusTool.textContent = `工具：${toolNames[state.activeTool] ?? state.activeTool}`;
 
   // Photo list
   photoList.innerHTML = state.photos
@@ -101,11 +102,11 @@ function renderUI(): void {
     angleSelect.value = photo.angle;
 
     if (photo.scale) {
-      scaleInfo.textContent = `${photo.scale.px_per_mm.toFixed(2)} px/mm (${photo.scale.distance_mm}mm ref)`;
-      statusScale.textContent = `Scale: ${photo.scale.px_per_mm.toFixed(2)} px/mm`;
+      scaleInfo.textContent = `${photo.scale.px_per_mm.toFixed(2)} px/mm（參考距離 ${photo.scale.distance_mm}mm）`;
+      statusScale.textContent = `比例尺：${photo.scale.px_per_mm.toFixed(2)} px/mm`;
     } else {
-      scaleInfo.textContent = 'Not calibrated — use Scale tool';
-      statusScale.textContent = 'Scale: -';
+      scaleInfo.textContent = '尚未校準 — 請使用比例尺工具';
+      statusScale.textContent = '比例尺：-';
     }
 
     // Features
@@ -118,7 +119,7 @@ function renderUI(): void {
       </div>
     `,
       )
-      .join('') || '<p style="font-size:13px;color:#8b949e;">No features</p>';
+      .join('') || '<p style="font-size:13px;color:#8b949e;">無標記特徵</p>';
 
     // Dimensions
     dimensionList.innerHTML = photo.dimensions
@@ -130,7 +131,7 @@ function renderUI(): void {
       </div>
     `,
       )
-      .join('') || '<p style="font-size:13px;color:#8b949e;">No dimensions</p>';
+      .join('') || '<p style="font-size:13px;color:#8b949e;">無手動尺寸</p>';
   }
 }
 
@@ -157,7 +158,7 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
 
   // Auto-create project if none exists
   if (!projectId) {
-    const name = prompt('Project name:', 'New Measurement') || 'New Measurement';
+    const name = prompt('請輸入專案名稱：', '新量測專案') || '新量測專案';
     const project = await api.createProject(name);
     projectId = project.id;
     store.setProject(project.id, project.name);
@@ -304,7 +305,7 @@ function setupEvents(): void {
   // Analyze
   document.getElementById('analyzeBtn')!.addEventListener('click', async () => {
     const projectId = store.getState().projectId;
-    if (!projectId) return alert('Create a project first');
+    if (!projectId) return alert('請先建立專案');
     const result = await api.analyzeProject(projectId);
     alert(JSON.stringify(result, null, 2));
   });
@@ -312,7 +313,7 @@ function setupEvents(): void {
   // Export JSON
   document.getElementById('exportBtn')!.addEventListener('click', async () => {
     const projectId = store.getState().projectId;
-    if (!projectId) return alert('Create a project first');
+    if (!projectId) return alert('請先建立專案');
     const result = await api.exportMeasurement(projectId);
     const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -326,10 +327,10 @@ function setupEvents(): void {
   // Copy JSON
   document.getElementById('copyJsonBtn')!.addEventListener('click', async () => {
     const projectId = store.getState().projectId;
-    if (!projectId) return alert('Create a project first');
+    if (!projectId) return alert('請先建立專案');
     const result = await api.exportMeasurement(projectId);
     await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
-    alert('JSON copied to clipboard');
+    alert('JSON 已複製到剪貼簿');
   });
 
   // Mouse coordinate tracking

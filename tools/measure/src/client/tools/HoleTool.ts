@@ -27,12 +27,11 @@ export function activateHoleTool(
     // Prompt for radius
     const photo = store.getActivePhoto();
     const unit = photo?.scale ? 'mm' : 'px';
-    const radiusStr = prompt(`Enter hole radius (${unit}):`);
+    const radiusStr = prompt(`請輸入圓孔半徑（${unit}）：`);
 
     if (radiusStr) {
       const radius = parseFloat(radiusStr);
       if (radius > 0) {
-        // Convert mm to px if scale available
         const radius_px = photo?.scale
           ? radius * photo.scale.px_per_mm
           : radius;
@@ -47,7 +46,7 @@ export function activateHoleTool(
         const feature: FeatureAnnotation = {
           id: `feat_${Date.now()}_${idCounter++}`,
           type: 'hole',
-          label: `Hole (r=${radius}${unit})`,
+          label: `圓孔（r=${radius}${unit}）`,
           shape,
           dimension_mm: photo?.scale ? radius : undefined,
         };

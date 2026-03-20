@@ -24,7 +24,7 @@ export function activateScaleTool(
 
     if (points.length === 2) {
       // Prompt for distance
-      const distStr = prompt('Enter the real distance between the two points (mm):');
+      const distStr = prompt('請輸入兩點之間的實際距離（mm）：');
       if (distStr) {
         const distance_mm = parseFloat(distStr);
         if (distance_mm > 0) {
