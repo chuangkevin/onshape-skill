@@ -71,15 +71,27 @@ const drawingLayer = new DrawingLayer(drawingCanvas, photoLayer);
 // Attach pan/zoom events to drawingCanvas (the top layer that receives events)
 photoLayer.attachEvents(drawingCanvas);
 
-// Auto-advance when state changes
+// Auto-advance when state changes + sync scale to DB
+let _lastScaleJson = '';
 store.subscribe(() => {
   autoAdvance();
-  // Wizard auto-advance based on state
+  // Wizard auto-advance: only advance the CURRENT step, never skip
   const photo = store.getActivePhoto();
   const state = store.getState();
-  if (state.photos.length > 0) wizardAutoAdvance(1);
-  if (photo?.scale) wizardAutoAdvance(2);
-  if (photo && photo.drawings.length > 0) wizardAutoAdvance(3);
+  if (wizardStep === 1 && state.photos.length > 0) {
+    // Don't auto-advance step 1 here — wait for SSE analysis to complete
+  }
+  // Only auto-advance step 2 when user manually sets scale (not during SSE)
+  // Step 3: just refresh display when drawings change (user must click confirm)
+
+  // Sync scale to DB whenever it changes
+  if (photo?.scale && state.projectId) {
+    const scaleJson = JSON.stringify(photo.scale);
+    if (scaleJson !== _lastScaleJson) {
+      _lastScaleJson = scaleJson;
+      api.updatePhoto(state.projectId, photo.id, { scale_data: scaleJson });
+    }
+  }
 });
 
 // ── Tool Management ──
@@ -309,9 +321,31 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
 
     if (data.step === 'ruler' && data.status === 'done') {
       autoAnalysisResults = { ...autoAnalysisResults, ruler: data.result };
+      // Auto-set scale in store when ruler found
+      if (data.result?.found) {
+        const r = data.result;
+        store.setScale({
+          pointA_px: { x: r.point_a.px_x, y: r.point_a.px_y },
+          pointB_px: { x: r.point_b.px_x, y: r.point_b.px_y },
+          distance_mm: r.distance_mm,
+          px_per_mm: r.px_per_mm,
+        });
+      }
     }
     if (data.step === 'contour' && data.status === 'done') {
       autoAnalysisResults = { ...autoAnalysisResults, contour: data.result };
+      // Auto-add largest contour as drawing
+      if (data.result?.contours?.length > 0) {
+        const largest = data.result.contours[0];
+        if (largest.contour_px?.length >= 3) {
+          store.addDrawing({
+            type: 'polyline',
+            id: 'auto_contour',
+            points_px: largest.contour_px,
+            closed: true,
+          });
+        }
+      }
     }
     if (data.step === 'labels' && data.status === 'done') {
       autoAnalysisResults = { ...autoAnalysisResults, labels: data.result };
@@ -722,9 +756,9 @@ function setupEvents(): void {
 
   // Export JSON
   document.getElementById('exportBtn')!.addEventListener('click', async () => {
-    const projectId = store.getState().projectId;
-    if (!projectId) return alert('請先建立專案');
-    const result = await api.exportMeasurement(projectId);
+    const state = store.getState();
+    if (!state.projectId) return alert('請先建立專案');
+    const result = await api.exportMeasurement(state.projectId, undefined, state.photos);
     const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'measurement.json'; a.click();
@@ -733,9 +767,9 @@ function setupEvents(): void {
 
   // Copy JSON
   document.getElementById('copyJsonBtn')!.addEventListener('click', async () => {
-    const projectId = store.getState().projectId;
-    if (!projectId) return alert('請先建立專案');
-    const result = await api.exportMeasurement(projectId);
+    const state = store.getState();
+    if (!state.projectId) return alert('請先建立專案');
+    const result = await api.exportMeasurement(state.projectId, undefined, state.photos);
     await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
     alert('JSON 已複製到剪貼簿');
   });
@@ -866,53 +900,76 @@ function updateWizard(): void {
   let bodyHtml = `<p>${WIZARD_INSTRUCTIONS[wizardStep]}</p>`;
 
   if (wizardStep === 2) {
-    const ruler = autoAnalysisResults?.ruler;
-    if (ruler?.found) {
-      bodyHtml = `
-        <p>偵測到尺規：<strong>${ruler.point_a.label} ~ ${ruler.point_b.label}</strong></p>
-        <p>建議比例尺：<strong>${ruler.px_per_mm.toFixed(2)} px/mm</strong></p>
+    const photo = store.getActivePhoto();
+    if (photo?.scale) {
+      // Scale already set (from auto-analysis or manual)
+      bodyHtml = `<p>比例尺已設定：<strong>${photo.scale.px_per_mm.toFixed(2)} px/mm</strong>（參考距離 ${photo.scale.distance_mm}mm）</p>
         <div style="margin-top:12px;">
           <button type="button" class="tool-btn primary" id="wizConfirmScale">確認使用</button>
-          <button type="button" class="tool-btn" id="wizManualScale">手動校準</button>
+          <button type="button" class="tool-btn" id="wizManualScale">重新校準</button>
         </div>`;
     } else {
-      bodyHtml = `
-        <p>未偵測到尺規，請手動校準比例尺</p>
-        <p style="color:#8b949e;">在照片中的尺規上點擊兩個刻度點</p>`;
-      activateTool('scale', true);
+      const ruler = autoAnalysisResults?.ruler;
+      if (ruler?.found) {
+        bodyHtml = `
+          <p>偵測到尺規：<strong>${ruler.point_a.label} ~ ${ruler.point_b.label}</strong></p>
+          <p>建議比例尺：<strong>${ruler.px_per_mm.toFixed(2)} px/mm</strong></p>
+          <div style="margin-top:12px;">
+            <button type="button" class="tool-btn primary" id="wizConfirmScale">確認使用</button>
+            <button type="button" class="tool-btn" id="wizManualScale">手動校準</button>
+          </div>`;
+      } else {
+        bodyHtml = `
+          <p>未偵測到尺規，請手動校準比例尺</p>
+          <p style="color:#8b949e;">在照片中的尺規上點擊兩個刻度點</p>`;
+        activateTool('scale', true);
+      }
     }
   } else if (wizardStep === 3) {
-    const contour = autoAnalysisResults?.contour;
-    const hasContour = contour?.contours?.length > 0;
+    const photo = store.getActivePhoto();
+    const existingDrawings = photo?.drawings || [];
 
-    if (hasContour) {
-      // Show AI contour on canvas
-      const largest = contour.contours[0];
-      const points = largest.contour_px;
-      const photo = store.getActivePhoto();
-      const hasAutoContour = photo?.drawings.some((d: any) => d.id === 'auto_contour');
-      if (!hasAutoContour && points.length >= 3) {
-        store.addDrawing({
-          type: 'polyline',
-          id: 'auto_contour',
-          points_px: points,
-          closed: true,
-        });
-        renderDrawings();
-      }
-
+    if (existingDrawings.length > 0) {
+      // Drawings already exist in store (from SSE auto-add or manual)
+      renderDrawings();
       bodyHtml = `
-        <p>偵測到 ${points.length} 點輪廓（綠色線條）</p>
+        <p>已有 ${existingDrawings.length} 個輪廓</p>
         <div style="margin-top:12px;">
           <button type="button" class="tool-btn primary" id="wizConfirmContour">確認輪廓</button>
           <button type="button" class="tool-btn" id="wizEditContour">微調</button>
           <button type="button" class="tool-btn" id="wizRedrawContour">重繪</button>
         </div>`;
     } else {
-      bodyHtml = `
-        <p>未偵測到輪廓，請手動描繪</p>
-        <p style="color:#8b949e;">沿零件邊緣逐點點擊，按 Enter 結束</p>`;
-      activateTool('polyline', true);
+      const contour = autoAnalysisResults?.contour;
+      const hasContour = contour?.contours?.length > 0;
+
+      if (hasContour) {
+        // Show AI contour on canvas
+        const largest = contour.contours[0];
+        const points = largest.contour_px;
+        if (points.length >= 3) {
+          store.addDrawing({
+            type: 'polyline',
+            id: 'auto_contour',
+            points_px: points,
+            closed: true,
+          });
+          renderDrawings();
+        }
+
+        bodyHtml = `
+          <p>偵測到 ${points.length} 點輪廓（綠色線條）</p>
+          <div style="margin-top:12px;">
+            <button type="button" class="tool-btn primary" id="wizConfirmContour">確認輪廓</button>
+            <button type="button" class="tool-btn" id="wizEditContour">微調</button>
+            <button type="button" class="tool-btn" id="wizRedrawContour">重繪</button>
+          </div>`;
+      } else {
+        bodyHtml = `
+          <p>未偵測到輪廓，請手動描繪</p>
+          <p style="color:#8b949e;">沿零件邊緣逐點點擊，按 Enter 結束</p>`;
+        activateTool('polyline', true);
+      }
     }
   } else if (wizardStep === 5) {
     bodyHtml = `
@@ -928,17 +985,26 @@ function updateWizard(): void {
   // Wire up step-specific buttons after innerHTML is set
   if (wizardStep === 2) {
     document.getElementById('wizConfirmScale')?.addEventListener('click', () => {
-      const ruler = autoAnalysisResults?.ruler;
-      if (ruler?.found) {
-        store.setScale({
-          pointA_px: { x: ruler.point_a.px_x, y: ruler.point_a.px_y },
-          pointB_px: { x: ruler.point_b.px_x, y: ruler.point_b.px_y },
-          distance_mm: ruler.distance_mm,
-          px_per_mm: ruler.px_per_mm,
-        });
+      const photo = store.getActivePhoto();
+      if (photo?.scale) {
+        // Scale already in store (from SSE auto-set or manual), just advance
         wizardStep = 3;
         updateWizard();
         renderUI();
+      } else {
+        const ruler = autoAnalysisResults?.ruler;
+        if (ruler?.found) {
+          store.setScale({
+            pointA_px: { x: ruler.point_a.px_x, y: ruler.point_a.px_y },
+            pointB_px: { x: ruler.point_b.px_x, y: ruler.point_b.px_y },
+            distance_mm: ruler.distance_mm,
+            px_per_mm: ruler.px_per_mm,
+          });
+          // DB sync happens via store.subscribe
+          wizardStep = 3;
+          updateWizard();
+          renderUI();
+        }
       }
     });
     document.getElementById('wizManualScale')?.addEventListener('click', () => {

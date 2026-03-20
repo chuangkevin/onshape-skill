@@ -84,10 +84,10 @@ export const analyzeProject = (projectId: number) =>
   apiFetch<any>(`/api/projects/${projectId}/analyze`, { method: 'POST' });
 
 // Export
-export const exportMeasurement = (projectId: number, path?: string) =>
+export const exportMeasurement = (projectId: number, path?: string, photos?: any[]) =>
   apiFetch<any>(`/api/projects/${projectId}/export`, {
     method: 'POST',
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, photos }),
   });
 
 // Auto-analyze (SSE stream)
