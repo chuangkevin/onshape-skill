@@ -79,13 +79,13 @@
 
 ## 10. Gemini AI Analysis Pipeline
 
-- [ ] 10.1 Create geminiClient.ts: Gemini 2.5 Flash API wrapper with key pool integration
-- [ ] 10.2 Implement OCR service (ocr.ts): send caliper close-ups, extract numeric readings
-- [ ] 10.3 Implement search service (search.ts): read labels, WebSearch for official specs
-- [ ] 10.4 Implement overlay service (overlay.ts): send composite image, interpret user drawing
-- [ ] 10.5 Implement parallel pipeline orchestrator (analyze.ts): fire all services concurrently with different keys
-- [ ] 10.6 Implement retry with 429 failover
-- [ ] 10.7 Implement result storage in SQLite
+- [x] 10.1 Create geminiClient.ts: Gemini 2.5 Flash API wrapper with key pool integration
+- [x] 10.2 Implement OCR service (ocr.ts): send caliper close-ups, extract numeric readings
+- [x] 10.3 Implement search service (search.ts): read labels, WebSearch for official specs
+- [x] 10.4 Implement overlay service (overlay.ts): send composite image, interpret user drawing
+- [x] 10.5 Implement parallel pipeline orchestrator (analyze.ts): fire all services concurrently with different keys
+- [x] 10.6 Implement retry with 429 failover
+- [x] 10.7 Implement result storage in SQLite
 - [ ] 10.8 Test: integration tests with mocked Gemini responses + one live E2E test
 
 ## 11. Measurement Fusion Engine
