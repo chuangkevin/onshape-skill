@@ -826,9 +826,7 @@ function setupModeEvents(): void {
   document.querySelectorAll('.mode-card').forEach((card) => {
     card.addEventListener('click', () => {
       const mode = (card as HTMLElement).dataset.mode as 'wizard' | 'free';
-      if (rememberModeCheckbox.checked) {
-        localStorage.setItem('measureMode', mode);
-      }
+      localStorage.setItem('measureMode', mode); // Always remember
       applyMode(mode);
     });
   });
