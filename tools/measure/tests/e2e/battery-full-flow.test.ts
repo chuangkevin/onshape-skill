@@ -197,28 +197,37 @@ test.describe('L390 電池完整量測流程', () => {
     // ═══════════════════════════════════════════
     console.log('\n=== STEP 9: 匯出 measurement.json ===');
 
-    // Use the API directly to get the JSON (avoid download dialog)
-    const projectId = await page.evaluate(() => {
-      // @ts-ignore
-      return (window as any).__store?.getState?.()?.projectId;
-    });
-
-    // Get project ID from the sidebar
     const sidebarName = await page.locator('#sidebarProjectName').textContent();
     console.log(`  專案: ${sidebarName}`);
 
-    // Call export API directly
-    const exportResult = await page.evaluate(async () => {
-      const projects = await fetch('/api/projects').then(r => r.json());
-      const latest = projects[0];
-      if (!latest) return null;
-      const result = await fetch(`/api/projects/${latest.id}/export`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      }).then(r => r.json());
-      return result;
-    });
+    // Intercept the download triggered by the export button
+    const downloadPromise = page.waitForEvent('download', { timeout: 10_000 }).catch(() => null);
+    await page.locator('#exportBtn').click();
+    const download = await downloadPromise;
+
+    let exportResult: any = null;
+    if (download) {
+      const path = await download.path();
+      if (path) {
+        const { readFileSync } = await import('fs');
+        exportResult = JSON.parse(readFileSync(path, 'utf-8'));
+      }
+    }
+
+    // Fallback: read from store directly
+    if (!exportResult) {
+      exportResult = await page.evaluate(async () => {
+        // @ts-ignore - access store from window
+        const state = (window as any).__debugStore?.();
+        if (!state?.projectId) return null;
+        const res = await fetch(`/api/projects/${state.projectId}/export`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ photos: state.photos }),
+        });
+        return res.json();
+      });
+    }
 
     if (exportResult) {
       const jsonStr = JSON.stringify(exportResult, null, 2);

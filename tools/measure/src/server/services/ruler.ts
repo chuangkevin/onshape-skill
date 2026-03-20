@@ -97,6 +97,66 @@ function pixelDistance(a: RulerPoint, b: RulerPoint): number {
  * caliper.  Returns the two reference points, their real-world distance in mm,
  * and the derived px_per_mm scale factor.
  */
+// ---------------------------------------------------------------------------
+// Object bounding box detection
+// ---------------------------------------------------------------------------
+
+const BBOX_PROMPT = `\
+You are analyzing a photo of a physical object (electronic component, battery, keyboard, etc.) placed on a surface, possibly with a ruler nearby.
+
+Your task: Find the MAIN OBJECT (not the ruler, not the background) and return its bounding box in pixel coordinates.
+
+The image origin (0,0) is at the top-left corner. x increases right, y increases down.
+
+Respond ONLY with JSON:
+{"found":true,"x":100,"y":50,"width":800,"height":400,"description":"laptop battery"}
+
+If no clear object is found:
+{"found":false}`;
+
+export interface BBoxResult {
+  found: boolean;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  description?: string;
+}
+
+export async function detectObjectBBox(
+  imagePath: string,
+  projectId?: number,
+): Promise<BBoxResult> {
+  try {
+    const { text } = await callGemini({
+      prompt: BBOX_PROMPT,
+      imagePaths: [imagePath],
+      callType: 'bbox-detection',
+      projectId,
+    });
+
+    const parsed: any = parseJsonFromText(text);
+    if (!parsed || !parsed.found) return { found: false };
+
+    if (typeof parsed.x !== 'number' || typeof parsed.y !== 'number' ||
+        typeof parsed.width !== 'number' || typeof parsed.height !== 'number') {
+      return { found: false };
+    }
+
+    return {
+      found: true,
+      x: Math.max(0, parsed.x),
+      y: Math.max(0, parsed.y),
+      width: parsed.width,
+      height: parsed.height,
+      description: parsed.description,
+    };
+  } catch (e) {
+    console.error('[bbox] Detection failed:', e);
+    return { found: false };
+  }
+}
+
 export async function detectRuler(
   imagePath: string,
   projectId?: number,
