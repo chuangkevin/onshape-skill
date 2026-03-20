@@ -75,8 +75,8 @@ router.get('/:id/analyze-stream', async (req, res) => {
   await runAnalysisStream(res, parseInt(req.params.id));
 });
 
-// POST /api/projects/:projectId/photos/:photoId/auto-analyze
-router.post('/:projectId/photos/:photoId/auto-analyze', async (req, res) => {
+// GET /api/projects/:projectId/photos/:photoId/auto-analyze (SSE - must be GET for EventSource)
+router.get('/:projectId/photos/:photoId/auto-analyze', async (req, res) => {
   const db = getDb();
   const photo: any = db.prepare(
     'SELECT * FROM photos WHERE id = ? AND project_id = ?'

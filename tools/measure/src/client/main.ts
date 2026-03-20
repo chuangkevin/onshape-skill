@@ -334,9 +334,14 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
 
   es.onerror = () => {
     es.close();
+    // Show error, don't auto-advance
     if (currentMode === 'wizard' && wizardStep === 1) {
-      wizardStep = 2;
-      updateWizard();
+      const body = document.getElementById('wizardBody');
+      if (body) {
+        body.innerHTML = `
+          <p style="color:#f85149;">AI 自動分析連線失敗</p>
+          <p style="color:#8b949e;margin-top:4px;">請點擊「下一步」手動操作，或重新上傳照片</p>`;
+      }
     }
   };
 }
