@@ -24,7 +24,7 @@ export class DrawingLayer {
     });
   }
 
-  render(shapes: DrawingShape[], scaleInfo?: { px_per_mm: number }): void {
+  render(shapes: DrawingShape[], scaleInfo?: { px_per_mm: number }, highlight?: { shapeId: string; hoveredVertexIndex: number; hoveredEdgeIndex: number; selectedVertexIndex: number }): void {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -36,7 +36,7 @@ export class DrawingLayer {
 
     // Draw completed shapes
     for (const shape of shapes) {
-      this.drawShape(shape, '#00ff88', 2 / t.scale);
+      this.drawShape(shape, '#00ff88', 2 / t.scale, t, highlight);
     }
 
     // Draw in-progress shape
@@ -52,7 +52,7 @@ export class DrawingLayer {
     ctx.restore();
   }
 
-  private drawShape(shape: DrawingShape, color: string, lineWidth: number): void {
+  private drawShape(shape: DrawingShape, color: string, lineWidth: number, t?: { scale: number; offsetX: number; offsetY: number }, highlight?: { shapeId: string; hoveredVertexIndex: number; hoveredEdgeIndex: number; selectedVertexIndex: number }): void {
     const { ctx } = this;
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
@@ -74,6 +74,38 @@ export class DrawingLayer {
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 4 / this.photoLayer.getTransform().scale, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      // Highlight overlay for edit-contour tool
+      if (highlight && shape.id === highlight.shapeId && t) {
+        const pts = shape.points_px;
+        // Hovered edge in red
+        if (highlight.hoveredEdgeIndex >= 0 && highlight.hoveredEdgeIndex < pts.length) {
+          const i = highlight.hoveredEdgeIndex;
+          const j = (i + 1) % pts.length;
+          ctx.beginPath();
+          ctx.moveTo(pts[i].x, pts[i].y);
+          ctx.lineTo(pts[j].x, pts[j].y);
+          ctx.strokeStyle = '#f85149';
+          ctx.lineWidth = 4 / t.scale;
+          ctx.stroke();
+        }
+        // Selected vertex in yellow
+        if (highlight.selectedVertexIndex >= 0 && highlight.selectedVertexIndex < pts.length) {
+          const pt = pts[highlight.selectedVertexIndex];
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 8 / t.scale, 0, Math.PI * 2);
+          ctx.fillStyle = '#f0e040';
+          ctx.fill();
+        }
+        // Hovered vertex in orange (if different from selected)
+        if (highlight.hoveredVertexIndex >= 0 && highlight.hoveredVertexIndex < pts.length && highlight.hoveredVertexIndex !== highlight.selectedVertexIndex) {
+          const pt = pts[highlight.hoveredVertexIndex];
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 6 / t.scale, 0, Math.PI * 2);
+          ctx.fillStyle = '#ff8800';
+          ctx.fill();
+        }
       }
     } else if (shape.type === 'arc') {
       this.drawArc(shape.start, shape.mid, shape.end, color, lineWidth);

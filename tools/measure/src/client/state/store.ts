@@ -28,7 +28,7 @@ export interface PhotoState {
   dimensions: ManualDimension[];
 }
 
-export type ToolType = 'select' | 'polyline' | 'arc' | 'hole' | 'scale';
+export type ToolType = 'select' | 'polyline' | 'arc' | 'hole' | 'scale' | 'edit-contour';
 
 type Listener = () => void;
 

@@ -6,6 +6,7 @@ import { activateArcTool } from './tools/ArcTool.js';
 import { activateScaleTool } from './tools/ScaleTool.js';
 import { activateHoleTool } from './tools/HoleTool.js';
 import { activateSelectTool } from './tools/SelectTool.js';
+import { activateEditContourTool, getContourHighlight } from './tools/EditContourTool.js';
 import * as api from './api/client.js';
 import type { ViewAngle } from '@shared/types.js';
 
@@ -58,10 +59,11 @@ const TOOL_HINTS: Record<string, string> = {
   arc: '依序點擊起點、中點、終點繪製弧線',
   hole: '在圓孔中心按住拖曳到邊緣，自動計算半徑',
   scale: '第一步：在照片中的尺規上點擊兩個刻度點',
+  'edit-contour': '點擊頂點選取 → Delete 刪除 | 拖曳移動 | 雙擊線段新增點',
 };
 
 const TOOL_NAMES: Record<string, string> = {
-  select: '選取', polyline: '多邊形', arc: '弧線', hole: '圓孔', scale: '比例尺',
+  select: '選取', polyline: '多邊形', arc: '弧線', hole: '圓孔', scale: '比例尺', 'edit-contour': '編輯輪廓',
 };
 
 // ── Canvas Layers ──
@@ -125,6 +127,9 @@ function activateTool(tool: ToolType, force = false): void {
     case 'scale':
       cleanupTool = activateScaleTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);
       break;
+    case 'edit-contour':
+      cleanupTool = activateEditContourTool(drawingCanvas, photoLayer, renderDrawingsWithHighlight);
+      break;
   }
 
   store.setActiveTool(tool);
@@ -135,6 +140,18 @@ function activateTool(tool: ToolType, force = false): void {
 function renderDrawingsAndTrack(): void {
   renderDrawings();
   renderUI();
+}
+
+/** Render with edit-contour highlight overlay */
+function renderDrawingsWithHighlight(): void {
+  const photo = store.getActivePhoto();
+  if (!photo) return;
+  const hl = getContourHighlight();
+  drawingLayer.render(
+    photo.drawings,
+    photo.scale ? { px_per_mm: photo.scale.px_per_mm } : undefined,
+    hl.shapeId ? hl : undefined,
+  );
 }
 
 let hintTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1017,7 +1034,21 @@ function updateWizard(): void {
       renderUI();
     });
     document.getElementById('wizEditContour')?.addEventListener('click', () => {
-      activateTool('polyline', true);
+      activateTool('edit-contour', true);
+      // Update wizard body to show edit instructions
+      const body = document.getElementById('wizardBody');
+      if (body) {
+        body.innerHTML = `
+          <p>輪廓編輯模式</p>
+          <p style="color:#8b949e;font-size:13px;">點擊頂點選取 → Delete 刪除 | 拖曳移動 | 雙擊線段新增點</p>
+          <div style="margin-top:12px;">
+            <button type="button" class="tool-btn primary" id="wizFinishEdit">完成微調</button>
+          </div>`;
+        document.getElementById('wizFinishEdit')?.addEventListener('click', () => {
+          activateTool('select', true);
+          updateWizard();
+        });
+      }
     });
     document.getElementById('wizRedrawContour')?.addEventListener('click', () => {
       store.removeDrawing('auto_contour');
