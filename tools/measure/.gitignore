@@ -1,7 +1,10 @@
 node_modules/
 dist/
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/uploads/
 *.db
 __pycache__/
 *.pyc
+.env

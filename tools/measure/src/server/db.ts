@@ -146,7 +146,7 @@ const MIGRATIONS = [
     name: '002_seed_gemini_keys',
     sql: `
       INSERT OR IGNORE INTO settings (key, value) VALUES
-        ('gemini_api_keys', '***REMOVED***,***REMOVED***,***REMOVED***,***REMOVED***,***REMOVED***'),
+        ('gemini_api_keys', ''),  -- Set via ENV: GEMINI_API_KEYS=key1,key2,key3
         ('gemini_model', 'gemini-2.5-flash');
     `,
   },
