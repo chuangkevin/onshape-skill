@@ -42,6 +42,7 @@ const wizNextBtn = document.getElementById('wizNext') as HTMLButtonElement;
 // ── Mode & Wizard State ──
 let currentMode: 'wizard' | 'free' = 'free';
 let wizardStep = 1;
+let wizardReady = false; // Don't auto-advance during init loading
 
 // ── Tool hints (Traditional Chinese) ──
 const TOOL_HINTS: Record<string, string> = {
@@ -721,6 +722,7 @@ function showWizardCheckmark(): void {
 /** Called when a wizard-relevant action completes (photo upload, scale set, contour drawn) */
 function wizardAutoAdvance(completedStep: number): void {
   if (currentMode !== 'wizard') return;
+  if (!wizardReady) return; // Don't auto-advance during init
   if (wizardStep !== completedStep) return;
 
   showWizardCheckmark();
@@ -791,6 +793,19 @@ async function init(): Promise<void> {
       await loadPhoto(store.getActivePhoto()!);
     }
     renderUI();
+  }
+
+  // Now wizard is ready to auto-advance from user actions (not init data)
+  wizardReady = true;
+
+  // Set wizard step based on current state (for returning users)
+  if (currentMode === 'wizard') {
+    const photo = store.getActivePhoto();
+    if (!store.getState().photos.length) wizardStep = 1;
+    else if (!photo?.scale) wizardStep = 2;
+    else if (!photo.drawings.length) wizardStep = 3;
+    else wizardStep = 4;
+    updateWizard();
   }
 }
 
