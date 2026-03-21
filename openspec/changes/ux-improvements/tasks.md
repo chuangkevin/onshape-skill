@@ -47,3 +47,9 @@
 - [x] 6.2 建立 docker-compose.yml（port mapping, volume mount for data/）
 - [x] 6.3 設定 PYTHON_PATH=/usr/bin/python3 環境變數
 - [ ] 6.4 測試：docker build + docker-compose up 在 ARM64 環境
+
+## 7. Windows 本機建置
+
+- [x] 7.1 測試：npm install + npm run build 在 Windows 環境正常完成
+- [x] 7.2 測試：npm run dev 啟動 dev server，瀏覽器可存取
+- [x] 7.3 測試：Playwright E2E 全套測試在 Windows 通過（14/14）
