@@ -8,43 +8,43 @@
 
 ---
 
-## Phase 1: AI 結果確認面板
+## Phase 1: AI 結果確認面板 ✅
 
-- [ ] 1.1 index.html 右側面板新增 #aiResultsPanel 區域 + CSS
-- [ ] 1.2 main.ts：分析完成後渲染結果卡片（型號/製造商/規格/OCR）
-- [ ] 1.3 確認勾選：每項有 checkbox，勾選後標記為已確認
-- [ ] 1.4 編輯功能：點擊數值 → 變成 input → blur 儲存
-- [ ] 1.5 確認的資料帶入 export
-- [ ] 1.6 E2E: Playwright 驗證分析後面板出現 + 勾選 + 編輯 + export 包含確認項目
-- [ ] 1.7 Commit + Push
+- [x] 1.1 index.html 右側面板新增 #aiResultsPanel 區域 + CSS
+- [x] 1.2 main.ts：分析完成後渲染結果卡片（型號/製造商/規格/OCR）
+- [x] 1.3 確認勾選：每項有 checkbox，勾選後標記為已確認
+- [x] 1.4 編輯功能：點擊數值 → 變成 input → blur 儲存
+- [x] 1.5 確認的資料帶入 export
+- [x] 1.6 E2E: Playwright 驗證分析後面板出現 + 勾選 + 編輯 + export 包含確認項目
+- [x] 1.7 Commit + Push (915b2c0)
 
-## Phase 2: Three.js 2.5D CAD 預覽
+## Phase 2: Three.js 2.5D CAD 預覽 ✅
 
-- [ ] 2.1 npm install three @types/three
-- [ ] 2.2 建立 src/client/preview/CadPreview.ts：Three.js 場景（相機、光源、OrbitControls）
-- [ ] 2.3 contour_mm → THREE.Shape → ExtrudeGeometry（厚度從 caliper_readings 取）
-- [ ] 2.4 circle features → Shape.holes 挖孔
-- [ ] 2.5 材質：半透明灰 + 線框 overlay
-- [ ] 2.6 尺寸標註：CSS2DRenderer 顯示長/寬/高
-- [ ] 2.7 預覽 modal UI：全螢幕 overlay + 關閉按鈕
-- [ ] 2.8 E2E: Playwright 驗證預覽 modal 開啟 + Three.js canvas 渲染 + 關閉
-- [ ] 2.9 Commit + Push
+- [x] 2.1 npm install three @types/three
+- [x] 2.2 建立 src/client/preview/CadPreview.ts：Three.js 場景（相機、光源、OrbitControls）
+- [x] 2.3 contour_mm → THREE.Shape → ExtrudeGeometry（厚度從 caliper_readings 取）
+- [x] 2.4 circle features → Shape.holes 挖孔
+- [x] 2.5 材質：半透明灰 + 線框 overlay
+- [x] 2.6 尺寸標註：HTML overlay 顯示寬/高/厚
+- [x] 2.7 預覽 modal UI：全螢幕 overlay + 關閉按鈕
+- [x] 2.8 E2E: Playwright 驗證預覽 modal 開啟 + Three.js canvas 渲染 + 關閉
+- [x] 2.9 Commit + Push (59192b6)
 
-## Phase 3: FeatureScript 生成
+## Phase 3: FeatureScript 生成 ✅
 
-- [ ] 3.1 建立 POST /api/generate-featurescript endpoint
-- [ ] 3.2 Gemini prompt：帶入 measurement.json + onshape-skill SKILL.md 的規則
-- [ ] 3.3 前端 modal 顯示生成的 code block + 複製按鈕
-- [ ] 3.4 E2E: Playwright 驗證生成按鈕 → API 呼叫 → code block 顯示
-- [ ] 3.5 Commit + Push
+- [x] 3.1 建立 POST /api/generate-featurescript endpoint
+- [x] 3.2 Gemini prompt：帶入 measurement.json + FeatureScript 規則
+- [x] 3.3 前端 modal 顯示生成的 code block + 複製按鈕
+- [x] 3.4 E2E: Playwright 驗證生成按鈕 → API 呼叫 → code block 顯示
+- [x] 3.5 Commit + Push (59192b6)
 
-## Phase 4: 自由模式引導 + Wizard 改善
+## Phase 4: 自由模式引導 + Wizard 改善 ✅
 
-- [ ] 4.1 分析完成後在右側「操作」區域上方顯示「下一步」按鈕組
-- [ ] 4.2 「預覽 CAD 模型」按鈕 → 開啟 Three.js 預覽 modal
-- [ ] 4.3 「生成 FeatureScript」按鈕 → 呼叫 API 生成程式碼
-- [ ] 4.4 按鈕狀態感知：無輪廓時禁用預覽，無分析時禁用生成
-- [ ] 4.5 Wizard 步驟 4：顯示 AI 結果確認面板
-- [ ] 4.6 Wizard 步驟 5：加入「預覽 CAD」+「生成 FeatureScript」按鈕
-- [ ] 4.7 E2E: Playwright 完整流程（Free + Wizard 模式）
-- [ ] 4.8 Commit + Push
+- [x] 4.1 分析完成後在右側「操作」區域顯示「下一步」按鈕組
+- [x] 4.2 「預覽 CAD 模型」按鈕 → 開啟 Three.js 預覽 modal
+- [x] 4.3 「生成 FeatureScript」按鈕 → 呼叫 API 生成程式碼
+- [x] 4.4 按鈕狀態感知：無輪廓時禁用預覽，無分析時禁用生成
+- [x] 4.5 Wizard 步驟 4：顯示 AI 結果確認面板
+- [x] 4.6 Wizard 步驟 5：加入「預覽 CAD」+「生成 FeatureScript」按鈕
+- [x] 4.7 E2E: Playwright 完整流程（Free + Wizard 模式）
+- [x] 4.8 Commit + Push (c5e1f39)
