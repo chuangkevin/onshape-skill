@@ -8,3 +8,10 @@ data/uploads/
 __pycache__/
 *.pyc
 .env
+
+# Test artifacts
+playwright-report/
+test-results/
+data/complete-workflow/
+data/ux-complete/
+data/ui-results-test/
