@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = resolve(__dirname, '../../data/ux-audit');
-const TEST_PHOTO = 'D:/Projects/trackpoint-laptop/doc/L390/硬體參考/鍵盤/S__10092548_0.jpg';
+const TEST_PHOTO = 'D:/GitClone/trackpoint-laptop/doc/L390/硬體參考/鍵盤/S__10092548_0.jpg';
 
 const auditLog: Array<{ step: string; screenshot: string; observation: string }> = [];
 

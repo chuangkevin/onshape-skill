@@ -10,7 +10,9 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'PORT=3939 npx tsx --env-file=.env src/server/index.ts',
+    command: process.platform === 'win32'
+      ? 'set PORT=3939&& npx tsx --env-file=.env src/server/index.ts'
+      : 'PORT=3939 npx tsx --env-file=.env src/server/index.ts',
     port: 3939,
     reuseExistingServer: true,
     timeout: 60000,

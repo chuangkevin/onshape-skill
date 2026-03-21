@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const RESULT_DIR = resolve(__dirname, '../../data/battery-test');
-const PHOTO_DIR = 'D:/Projects/trackpoint-laptop/doc/L390/硬體參考/電池';
+const PHOTO_DIR = 'D:/GitClone/trackpoint-laptop/doc/L390/硬體參考/電池';
 
 const PHOTOS = {
   top: resolve(PHOTO_DIR, 'S__10092550_0.jpg'),       // 俯視圖 + 尺規
