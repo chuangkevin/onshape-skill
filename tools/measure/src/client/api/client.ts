@@ -94,3 +94,30 @@ export const exportMeasurement = (projectId: number, path?: string, photos?: any
 export function autoAnalyzeStream(projectId: number, photoId: number): EventSource {
   return new EventSource(`/api/projects/${projectId}/photos/${photoId}/auto-analyze`);
 }
+
+// API Keys
+export interface ApiKeyInfo {
+  suffix: string;
+  calls_today: number;
+  total_tokens_today: number;
+  calls_7d: number;
+  calls_30d: number;
+}
+
+export const listApiKeys = () => apiFetch<ApiKeyInfo[]>('/api/keys');
+
+export const addApiKey = (key: string) =>
+  apiFetch<{ added: boolean; suffix: string }>('/api/keys', {
+    method: 'POST',
+    body: JSON.stringify({ key }),
+  });
+
+export const deleteApiKey = (suffix: string) =>
+  apiFetch<{ deleted: boolean }>(`/api/keys/${suffix}`, { method: 'DELETE' });
+
+// FeatureScript generation
+export const generateFeatureScript = (measurementJson: any) =>
+  apiFetch<{ code: string }>('/api/generate-featurescript', {
+    method: 'POST',
+    body: JSON.stringify(measurementJson),
+  });

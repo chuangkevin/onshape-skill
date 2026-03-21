@@ -37,6 +37,24 @@ const newProjectBtn = document.getElementById('newProjectBtn') as HTMLButtonElem
 const backToLanding = document.getElementById('backToLanding') as HTMLButtonElement;
 const sidebarProjectName = document.getElementById('sidebarProjectName') as HTMLSpanElement;
 
+// ── AI Results & Next Steps DOM Elements ──
+const aiResultsPanel = document.getElementById('aiResultsPanel') as HTMLDivElement;
+const nextSteps = document.getElementById('nextSteps') as HTMLDivElement;
+const previewCadBtn = document.getElementById('previewCadBtn') as HTMLButtonElement;
+const genFeatureScriptBtn = document.getElementById('genFeatureScriptBtn') as HTMLButtonElement;
+const codeModal = document.getElementById('codeModal') as HTMLDivElement;
+const codeModalContent = document.getElementById('codeModalContent') as HTMLPreElement;
+const previewModal = document.getElementById('previewModal') as HTMLDivElement;
+const previewContainer = document.getElementById('previewContainer') as HTMLDivElement;
+
+// ── Settings DOM Elements ──
+const settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
+const settingsOverlay = document.getElementById('settingsOverlay') as HTMLDivElement;
+const settingsClose = document.getElementById('settingsClose') as HTMLButtonElement;
+const newKeyInput = document.getElementById('newKeyInput') as HTMLInputElement;
+const addKeyBtn = document.getElementById('addKeyBtn') as HTMLButtonElement;
+const keyList = document.getElementById('keyList') as HTMLDivElement;
+
 // ── Mode & Wizard DOM Elements ──
 const modeSelector = document.getElementById('modeSelector') as HTMLDivElement;
 const modeToggleBtn = document.getElementById('modeToggle') as HTMLButtonElement;
@@ -601,60 +619,169 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
 }
 
 // ── AI Analysis Display ──
+interface ConfirmedItem {
+  key: string;
+  label: string;
+  value: string;
+  confirmed: boolean;
+  group: string;
+}
+
+let confirmedItems: ConfirmedItem[] = [];
+let lastAnalysisRaw: any = null;
+
 function showAnalysisLoading(): void {
   analysisResults.innerHTML = `
     <div class="results-panel">
       <h4><span class="loading-spinner"></span> AI 分析中...</h4>
       <p style="color:#8b949e;margin-top:6px;">正在使用 Gemini 進行 OCR、標籤辨識和形狀分析</p>
     </div>`;
+  aiResultsPanel.innerHTML = '';
+  nextSteps.style.display = 'none';
+}
+
+function buildConfirmedItems(result: any): ConfirmedItem[] {
+  const items: ConfirmedItem[] = [];
+  const ai = result.result?.ai;
+
+  if (ai?.label_info?.model_number) {
+    items.push({ key: 'model_number', label: '型號', value: ai.label_info.model_number, confirmed: true, group: '基本資訊' });
+  }
+  if (ai?.label_info?.manufacturer) {
+    items.push({ key: 'manufacturer', label: '製造商', value: ai.label_info.manufacturer, confirmed: true, group: '基本資訊' });
+  }
+  if (ai?.official_specs) {
+    for (const [k, v] of Object.entries(ai.official_specs)) {
+      items.push({ key: `spec_${k}`, label: k, value: `${v}`, confirmed: true, group: '官方規格 (mm)' });
+    }
+  }
+  if (ai?.ocr_readings?.length > 0) {
+    for (const r of ai.ocr_readings) {
+      items.push({ key: `ocr_${r.location}`, label: r.location, value: `${r.value} ${r.unit}`, confirmed: true, group: '卡尺讀數' });
+    }
+  }
+  return items;
+}
+
+function renderAiResultsPanel(): void {
+  if (confirmedItems.length === 0) {
+    aiResultsPanel.innerHTML = '';
+    return;
+  }
+
+  const groups = new Map<string, ConfirmedItem[]>();
+  for (const item of confirmedItems) {
+    if (!groups.has(item.group)) groups.set(item.group, []);
+    groups.get(item.group)!.push(item);
+  }
+
+  let html = '<div class="ai-results"><h4>AI 分析結果</h4>';
+  for (const [groupName, items] of groups) {
+    html += `<div class="ai-result-group"><div class="ai-result-group-title">${groupName}</div>`;
+    for (const item of items) {
+      html += `
+        <div class="ai-result-card" data-key="${item.key}">
+          <input type="checkbox" ${item.confirmed ? 'checked' : ''} data-action="toggle" title="勾選以納入匯出" />
+          <span class="result-label">${item.label}：</span>
+          <span class="result-value" data-action="edit">${item.value}</span>
+        </div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  aiResultsPanel.innerHTML = html;
+}
+
+function setupAiResultsPanelEvents(): void {
+  aiResultsPanel.addEventListener('change', (e) => {
+    const checkbox = e.target as HTMLInputElement;
+    if (checkbox.dataset.action !== 'toggle') return;
+    const card = checkbox.closest('.ai-result-card') as HTMLElement;
+    const key = card?.dataset.key;
+    const item = confirmedItems.find(i => i.key === key);
+    if (item) item.confirmed = checkbox.checked;
+  });
+
+  aiResultsPanel.addEventListener('click', (e) => {
+    const span = (e.target as HTMLElement).closest('[data-action="edit"]') as HTMLElement;
+    if (!span) return;
+    const card = span.closest('.ai-result-card') as HTMLElement;
+    const key = card?.dataset.key;
+    const item = confirmedItems.find(i => i.key === key);
+    if (!item) return;
+
+    // Replace span with input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'result-edit';
+    input.value = item.value;
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const commit = () => {
+      const newVal = input.value.trim();
+      if (newVal) item.value = newVal;
+      renderAiResultsPanel();
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') input.blur(); });
+  });
+}
+
+function getConfirmedExportData(): Record<string, any> {
+  const data: Record<string, any> = {};
+  for (const item of confirmedItems) {
+    if (!item.confirmed) continue;
+    if (item.key === 'model_number') data.model_number = item.value;
+    else if (item.key === 'manufacturer') data.manufacturer = item.value;
+    else if (item.key.startsWith('spec_')) {
+      if (!data.official_specs) data.official_specs = {};
+      data.official_specs[item.label] = parseFloat(item.value) || item.value;
+    } else if (item.key.startsWith('ocr_')) {
+      if (!data.caliper_readings) data.caliper_readings = [];
+      const parts = item.value.split(/\s+/);
+      data.caliper_readings.push({ location: item.label, value_mm: parseFloat(parts[0]), unit: parts[1] || 'mm' });
+    }
+  }
+  return data;
 }
 
 function showAnalysisResult(result: any): void {
+  lastAnalysisRaw = result;
   const ai = result.result?.ai;
   const opencv = result.result?.opencv;
 
-  let html = '<div class="results-panel"><h4>分析結果</h4>';
-
-  // OCR readings
-  if (ai?.ocr_readings?.length > 0) {
-    html += '<div style="margin-top:6px"><strong style="color:#58a6ff;">卡尺讀數：</strong></div>';
-    for (const r of ai.ocr_readings) {
-      html += `<div class="result-item"><span class="result-label">${r.location}：</span><span class="result-value">${r.value} ${r.unit}</span></div>`;
-    }
-  }
-
-  // Label info
-  if (ai?.label_info?.model_number) {
-    html += `<div style="margin-top:6px"><strong style="color:#58a6ff;">型號：</strong> ${ai.label_info.model_number}</div>`;
-    if (ai.label_info.manufacturer) {
-      html += `<div class="result-item"><span class="result-label">製造商：</span><span class="result-value">${ai.label_info.manufacturer}</span></div>`;
-    }
-  }
-
-  // Official specs
-  if (ai?.official_specs && Object.keys(ai.official_specs).length > 0) {
-    html += '<div style="margin-top:6px"><strong style="color:#58a6ff;">官方規格：</strong></div>';
-    for (const [key, val] of Object.entries(ai.official_specs)) {
-      html += `<div class="result-item"><span class="result-label">${key}：</span><span class="result-value">${val} mm</span></div>`;
-    }
-  }
-
-  // OpenCV
+  // Summary in analysisResults
+  let html = '<div class="results-panel"><h4>分析完成</h4>';
+  const ocrCount = ai?.ocr_readings?.length || 0;
+  const specCount = ai?.official_specs ? Object.keys(ai.official_specs).length : 0;
+  const model = ai?.label_info?.model_number || '未偵測';
+  html += `<div class="result-item"><span class="result-label">型號：</span><span class="result-value">${model}</span></div>`;
+  html += `<div class="result-item"><span class="result-label">卡尺讀數：</span><span class="result-value">${ocrCount} 項</span></div>`;
+  html += `<div class="result-item"><span class="result-label">官方規格：</span><span class="result-value">${specCount} 項</span></div>`;
   if (opencv) {
     const totalContours = opencv.reduce((sum: number, o: any) => sum + (o.contours?.length || 0), 0);
-    const totalCircles = opencv.reduce((sum: number, o: any) => sum + (o.circles?.length || 0), 0);
-    html += `<div style="margin-top:6px"><strong style="color:#58a6ff;">OpenCV：</strong> ${totalContours} 個輪廓, ${totalCircles} 個圓</div>`;
-    if (opencv.some((o: any) => o.error)) {
-      html += `<div class="result-error">OpenCV 錯誤：${opencv.find((o: any) => o.error)?.error}</div>`;
-    }
+    html += `<div class="result-item"><span class="result-label">OpenCV：</span><span class="result-value">${totalContours} 個輪廓</span></div>`;
   }
-
-  if (!ai?.ocr_readings?.length && !ai?.label_info && !ai?.official_specs) {
-    html += '<div style="color:#8b949e;margin-top:6px;">未偵測到數據。請確認照片中包含卡尺、標籤或尺規。</div>';
-  }
-
   html += '</div>';
   analysisResults.innerHTML = html;
+
+  // Build confirmation panel
+  confirmedItems = buildConfirmedItems(result);
+  renderAiResultsPanel();
+
+  // Show next-step buttons
+  showNextSteps();
+}
+
+function showNextSteps(): void {
+  nextSteps.style.display = 'flex';
+  // Enable/disable based on state
+  const hasContour = (store.getActivePhoto()?.drawings?.length || 0) > 0;
+  const hasAnalysis = lastAnalysisRaw != null;
+  previewCadBtn.disabled = !hasContour;
+  genFeatureScriptBtn.disabled = !hasAnalysis;
 }
 
 function showAnalysisError(err: any): void {
@@ -771,11 +898,23 @@ function setupEvents(): void {
     }
   });
 
-  // Export JSON
-  document.getElementById('exportBtn')!.addEventListener('click', async () => {
+  // Export JSON (with confirmed AI results merged)
+  const doExport = async (): Promise<any> => {
     const state = store.getState();
-    if (!state.projectId) return alert('請先建立專案');
+    if (!state.projectId) { alert('請先建立專案'); return null; }
     const result = await api.exportMeasurement(state.projectId, undefined, state.photos);
+    // Merge confirmed AI results
+    const confirmed = getConfirmedExportData();
+    if (confirmed.model_number) result.model_number = confirmed.model_number;
+    if (confirmed.manufacturer) result.manufacturer = confirmed.manufacturer;
+    if (confirmed.official_specs) result.official_specs = { ...result.official_specs, ...confirmed.official_specs };
+    if (confirmed.caliper_readings) result.caliper_readings = confirmed.caliper_readings;
+    return result;
+  };
+
+  document.getElementById('exportBtn')!.addEventListener('click', async () => {
+    const result = await doExport();
+    if (!result) return;
     const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'measurement.json'; a.click();
@@ -784,11 +923,52 @@ function setupEvents(): void {
 
   // Copy JSON
   document.getElementById('copyJsonBtn')!.addEventListener('click', async () => {
-    const state = store.getState();
-    if (!state.projectId) return alert('請先建立專案');
-    const result = await api.exportMeasurement(state.projectId, undefined, state.photos);
+    const result = await doExport();
+    if (!result) return;
     await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
     alert('JSON 已複製到剪貼簿');
+  });
+
+  // Next-step buttons
+  previewCadBtn.addEventListener('click', () => {
+    // Phase 2 will implement this
+    previewModal.classList.remove('hidden');
+  });
+
+  genFeatureScriptBtn.addEventListener('click', async () => {
+    // Phase 3 will implement this
+    const result = await doExport();
+    if (!result) return;
+    codeModalContent.textContent = '生成中...';
+    codeModal.classList.remove('hidden');
+    try {
+      const resp = await api.generateFeatureScript(result);
+      codeModalContent.textContent = resp.code || '生成失敗';
+    } catch (err: unknown) {
+      codeModalContent.textContent = '錯誤：' + (err instanceof Error ? err.message : '未知錯誤');
+    }
+  });
+
+  // Code modal events
+  document.getElementById('codeModalClose')!.addEventListener('click', () => codeModal.classList.add('hidden'));
+  document.getElementById('codeModalCloseBtn')!.addEventListener('click', () => codeModal.classList.add('hidden'));
+  document.getElementById('codeModalCopy')!.addEventListener('click', () => {
+    navigator.clipboard.writeText(codeModalContent.textContent || '');
+    (document.getElementById('codeModalCopy') as HTMLButtonElement).textContent = '已複製！';
+    setTimeout(() => { (document.getElementById('codeModalCopy') as HTMLButtonElement).textContent = '複製程式碼'; }, 1500);
+  });
+  codeModal.addEventListener('click', (e) => { if (e.target === codeModal) codeModal.classList.add('hidden'); });
+
+  // Preview modal events
+  document.getElementById('previewClose')!.addEventListener('click', () => {
+    previewModal.classList.add('hidden');
+    previewContainer.innerHTML = '';
+  });
+  previewModal.addEventListener('click', (e) => {
+    if (e.target === previewModal) {
+      previewModal.classList.add('hidden');
+      previewContainer.innerHTML = '';
+    }
   });
 
   // Mouse coordinate tracking
@@ -1140,14 +1320,93 @@ function setupWizardEvents(): void {
   });
 }
 
+// ── Settings ──
+async function renderKeyList(): Promise<void> {
+  try {
+    const keys = await api.listApiKeys();
+    if (keys.length === 0) {
+      keyList.innerHTML = '<div class="key-empty">尚未新增任何 API Key</div>';
+      return;
+    }
+    keyList.innerHTML = keys.map(k => `
+      <div class="key-item">
+        <div>
+          <span class="key-suffix">****${k.suffix}</span>
+          <span class="key-stats"> — 今日 ${k.calls_today} 次 / ${k.total_tokens_today.toLocaleString()} tokens</span>
+        </div>
+        <button class="key-delete" data-suffix="${k.suffix}" title="刪除">&times;</button>
+      </div>
+    `).join('');
+  } catch {
+    keyList.innerHTML = '<div class="key-empty" style="color:#f85149">載入失敗</div>';
+  }
+}
+
+function setupSettingsEvents(): void {
+  settingsBtn.addEventListener('click', () => {
+    settingsOverlay.classList.remove('hidden');
+    renderKeyList();
+  });
+
+  settingsClose.addEventListener('click', () => {
+    settingsOverlay.classList.add('hidden');
+  });
+
+  settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === settingsOverlay) settingsOverlay.classList.add('hidden');
+  });
+
+  addKeyBtn.addEventListener('click', async () => {
+    const key = newKeyInput.value.trim();
+    if (!key) return;
+    addKeyBtn.textContent = '新增中…';
+    addKeyBtn.setAttribute('disabled', '');
+    try {
+      const result = await api.addApiKey(key);
+      if (result.added) {
+        newKeyInput.value = '';
+        await renderKeyList();
+      }
+    } catch (err: unknown) {
+      alert('新增失敗：' + (err instanceof Error ? err.message : '未知錯誤'));
+    } finally {
+      addKeyBtn.textContent = '新增';
+      addKeyBtn.removeAttribute('disabled');
+    }
+  });
+
+  newKeyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addKeyBtn.click();
+  });
+
+  keyList.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest('.key-delete') as HTMLElement | null;
+    if (!btn) return;
+    const suffix = btn.dataset.suffix!;
+    if (!confirm(`確定刪除末碼 ${suffix} 的 API Key？`)) return;
+    try {
+      await api.deleteApiKey(suffix);
+      await renderKeyList();
+    } catch (err: unknown) {
+      alert('刪除失敗：' + (err instanceof Error ? err.message : '未知錯誤'));
+    }
+  });
+}
+
 // ── Init ──
 async function init(): Promise<void> {
   resizeCanvases();
   setupEvents();
   setupModeEvents();
   setupWizardEvents();
+  setupSettingsEvents();
+  setupAiResultsPanelEvents();
   activateTool('select');
   renderUI();
+
+  // Expose store for E2E tests
+  (window as any).__debugStore = () => store.getState();
+  (window as any).__debugConfirmed = () => getConfirmedExportData();
 
   // Show project landing page
   await showLanding();

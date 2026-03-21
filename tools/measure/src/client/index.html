@@ -137,6 +137,70 @@
     .project-card .card-btn:hover { background:#30363d; }
     .project-card .card-btn.danger { color:#f85149; border-color:#f8514933; }
     .project-card .card-btn.danger:hover { background:#f8514922; }
+
+    /* Settings Modal */
+    .settings-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:200; display:flex; align-items:center; justify-content:center; }
+    .settings-overlay.hidden { display:none; }
+    .settings-panel { background:#161b22; border:1px solid #30363d; border-radius:12px; width:520px; max-height:80vh; display:flex; flex-direction:column; }
+    .settings-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #30363d; }
+    .settings-header h2 { font-size:18px; }
+    .settings-close { background:none; border:none; color:#8b949e; font-size:20px; cursor:pointer; padding:4px 8px; border-radius:4px; }
+    .settings-close:hover { color:#c9d1d9; background:#21262d; }
+    .settings-body { padding:20px; overflow-y:auto; flex:1; }
+    .settings-section { margin-bottom:20px; }
+    .settings-section h3 { font-size:14px; color:#8b949e; margin-bottom:12px; letter-spacing:0.3px; }
+    .key-add-form { display:flex; gap:8px; margin-bottom:12px; }
+    .key-add-form input { flex:1; padding:8px 12px; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; font-size:13px; font-family:monospace; }
+    .key-add-form input::placeholder { color:#484f58; }
+    .key-add-form button { padding:8px 16px; background:#238636; border:none; color:#fff; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
+    .key-add-form button:hover { background:#2ea043; }
+    .key-list { display:flex; flex-direction:column; gap:6px; }
+    .key-item { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; font-size:13px; }
+    .key-item .key-suffix { font-family:monospace; color:#58a6ff; font-weight:600; }
+    .key-item .key-stats { color:#8b949e; font-size:12px; }
+    .key-item .key-delete { background:none; border:none; color:#f85149; cursor:pointer; font-size:14px; padding:2px 6px; border-radius:4px; }
+    .key-item .key-delete:hover { background:#f8514922; }
+    .key-empty { color:#484f58; font-size:13px; text-align:center; padding:16px; }
+    .settings-hint { color:#484f58; font-size:12px; margin-top:8px; }
+
+    /* AI Results Confirmation Panel */
+    .ai-results { background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:12px; margin-top:8px; font-size:13px; }
+    .ai-results h4 { color:#58a6ff; margin-bottom:8px; font-size:13px; }
+    .ai-result-card { display:flex; align-items:center; gap:6px; padding:6px 8px; border-bottom:1px solid #21262d; }
+    .ai-result-card:last-child { border-bottom:none; }
+    .ai-result-card input[type="checkbox"] { flex-shrink:0; cursor:pointer; accent-color:#238636; }
+    .ai-result-card .result-label { color:#8b949e; min-width:60px; }
+    .ai-result-card .result-value { color:#c9d1d9; font-weight:500; cursor:pointer; flex:1; }
+    .ai-result-card .result-value:hover { color:#58a6ff; text-decoration:underline dotted; }
+    .ai-result-card .result-edit { padding:3px 6px; background:#0d1117; border:1px solid #1f6feb; color:#c9d1d9; border-radius:4px; font-size:13px; width:100%; }
+    .ai-result-group { margin-top:8px; }
+    .ai-result-group-title { color:#58a6ff; font-size:12px; font-weight:600; margin-bottom:4px; letter-spacing:0.3px; }
+    .ai-results-empty { color:#484f58; text-align:center; padding:12px; }
+
+    /* Next-step guide buttons */
+    .next-steps { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+    .next-step-btn { width:100%; padding:8px 12px; border:1px solid #30363d; background:#21262d; color:#c9d1d9; border-radius:6px; cursor:pointer; font-size:13px; text-align:left; }
+    .next-step-btn:hover:not(:disabled) { background:#30363d; }
+    .next-step-btn:disabled { opacity:0.4; cursor:not-allowed; }
+    .next-step-btn.highlight { background:#1f6feb22; border-color:#1f6feb; color:#58a6ff; }
+    .next-step-btn.highlight:hover { background:#1f6feb33; }
+
+    /* FeatureScript / Preview Modal */
+    .code-modal { position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:200; display:flex; align-items:center; justify-content:center; }
+    .code-modal.hidden { display:none; }
+    .code-modal-panel { background:#161b22; border:1px solid #30363d; border-radius:12px; width:80vw; max-width:900px; max-height:85vh; display:flex; flex-direction:column; }
+    .code-modal-header { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #30363d; }
+    .code-modal-header h2 { font-size:16px; }
+    .code-modal-body { padding:0; overflow:auto; flex:1; }
+    .code-modal-body pre { margin:0; padding:16px 20px; font-size:13px; line-height:1.6; color:#c9d1d9; white-space:pre-wrap; word-break:break-word; font-family:'Cascadia Code','Fira Code',monospace; }
+    .code-modal-footer { display:flex; gap:8px; padding:12px 20px; border-top:1px solid #30363d; }
+
+    /* Preview modal (Three.js) */
+    .preview-modal { position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:200; display:flex; align-items:center; justify-content:center; }
+    .preview-modal.hidden { display:none; }
+    .preview-modal canvas { border-radius:8px; }
+    .preview-close { position:absolute; top:16px; right:16px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; font-size:18px; padding:6px 12px; border-radius:6px; cursor:pointer; z-index:201; }
+    .preview-close:hover { background:#30363d; }
   </style>
 </head>
 <body>
@@ -159,7 +223,9 @@
   <div class="header">
     <h1>照片量測工具</h1>
     <span class="project-name" id="projectName">尚無專案</span>
-    <button type="button" class="tool-btn" id="modeToggle" style="margin-left:auto;">切換模式</button>
+    <span style="flex:1;"></span>
+    <button type="button" class="tool-btn" id="settingsBtn" title="設定">&#9881; 設定</button>
+    <button type="button" class="tool-btn" id="modeToggle">切換模式</button>
   </div>
 
   <div id="projectLanding" class="project-landing">
@@ -291,9 +357,14 @@
       <div class="sidebar-section">
         <h3>操作</h3>
         <button type="button" class="action-btn primary" id="analyzeBtn">AI 分析</button>
-        <button type="button" class="action-btn" id="exportBtn">匯出 JSON</button>
-        <button type="button" class="action-btn" id="copyJsonBtn">複製 JSON</button>
         <div id="analysisResults"></div>
+        <div id="aiResultsPanel"></div>
+        <div id="nextSteps" class="next-steps" style="display:none;">
+          <button type="button" class="next-step-btn highlight" id="previewCadBtn" disabled>預覽 CAD 模型</button>
+          <button type="button" class="next-step-btn highlight" id="genFeatureScriptBtn" disabled>生成 FeatureScript</button>
+          <button type="button" class="action-btn" id="exportBtn">匯出 JSON</button>
+          <button type="button" class="action-btn" id="copyJsonBtn">複製 JSON</button>
+        </div>
       </div>
     </div>
   </div>
@@ -302,6 +373,52 @@
     <span id="statusCoords">-</span>
     <span id="statusScale">比例尺：-</span>
     <span id="statusTool">工具：選取</span>
+  </div>
+
+  <!-- FeatureScript Code Modal -->
+  <div id="codeModal" class="code-modal hidden">
+    <div class="code-modal-panel">
+      <div class="code-modal-header">
+        <h2>FeatureScript</h2>
+        <button type="button" class="settings-close" id="codeModalClose">&times;</button>
+      </div>
+      <div class="code-modal-body">
+        <pre id="codeModalContent"></pre>
+      </div>
+      <div class="code-modal-footer">
+        <button type="button" class="action-btn primary" id="codeModalCopy">複製程式碼</button>
+        <button type="button" class="action-btn" id="codeModalCloseBtn">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CAD Preview Modal -->
+  <div id="previewModal" class="preview-modal hidden">
+    <button type="button" class="preview-close" id="previewClose">&times; 關閉</button>
+    <div id="previewContainer" style="width:80vw;height:80vh;"></div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsOverlay" class="settings-overlay hidden">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <h2>設定</h2>
+        <button type="button" class="settings-close" id="settingsClose">&times;</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-section">
+          <h3>GEMINI API KEYS</h3>
+          <div class="key-add-form">
+            <input type="text" id="newKeyInput" placeholder="貼上 API Key（例：AIzaSy...）" />
+            <button type="button" id="addKeyBtn">新增</button>
+          </div>
+          <div class="key-list" id="keyList">
+            <!-- Dynamic key items -->
+          </div>
+          <div class="settings-hint">API Key 只顯示末 4 碼，儲存在本地 SQLite 資料庫中，不會上傳。</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./main.ts"></script>
