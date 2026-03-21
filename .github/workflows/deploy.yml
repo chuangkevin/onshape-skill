@@ -84,7 +84,7 @@ jobs:
             }
 
             echo "Navigating to deployment directory..."
-            cd '"${DEPLOY_PATH}"'
+            cd "'"${DEPLOY_PATH}"'"
 
             retry_pull
 
