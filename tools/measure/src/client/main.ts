@@ -1482,6 +1482,7 @@ async function init(): Promise<void> {
   (window as any).__debugStore = () => store.getState();
   (window as any).__debugStoreApi = store;
   (window as any).__debugConfirmed = () => getConfirmedExportData();
+  (window as any).__debugRenderUI = renderUI;
 
   // Show project landing page
   await showLanding();

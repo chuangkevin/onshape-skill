@@ -280,6 +280,8 @@ test.describe('7.5 比例尺校準', () => {
         distance_mm: 100,
         px_per_mm: 2.0, // 200px / 100mm
       });
+      // Trigger UI re-render after store update
+      (window as any).__debugRenderUI?.();
     });
     await page.waitForTimeout(500);
 
@@ -413,13 +415,13 @@ test.describe('10.8 AI 分析 — Live Gemini', () => {
     await analyzeBtn.click();
     console.log('⏳ 開始 AI 分析...');
 
-    // Wait for result — the #analysisResult element should get text content
+    // Wait for result — the #analysisResults element should get text content
     await page.waitForFunction(() => {
-      const el = document.querySelector('#analysisResult');
+      const el = document.querySelector('#analysisResults');
       return el && el.textContent && el.textContent.length > 10;
     }, { timeout: 90_000 });
 
-    const resultText = await page.locator('#analysisResult').textContent();
+    const resultText = await page.locator('#analysisResults').textContent();
     console.log(`✓ AI 分析完成，結果長度: ${resultText?.length}`);
     console.log(`  結果摘要: ${resultText?.substring(0, 150)}`);
 
@@ -459,7 +461,7 @@ test.describe('12.5 匯出工作流', () => {
     console.log('⏳ AI 分析...');
     await page.locator('#analyzeBtn').click();
     await page.waitForFunction(() => {
-      const el = document.querySelector('#analysisResult');
+      const el = document.querySelector('#analysisResults');
       return el && el.textContent && el.textContent.length > 10;
     }, { timeout: 90_000 });
     await page.waitForTimeout(1000);
@@ -583,11 +585,11 @@ test.describe('13.1-13.3 L390 電池完整 E2E', () => {
     await page.locator('#analyzeBtn').click();
 
     await page.waitForFunction(() => {
-      const el = document.querySelector('#analysisResult');
+      const el = document.querySelector('#analysisResults');
       return el && el.textContent && el.textContent.length > 10;
     }, { timeout: 90_000 });
 
-    const resultText = await page.locator('#analysisResult').textContent();
+    const resultText = await page.locator('#analysisResults').textContent();
     console.log(`✓ Step 5: AI 分析完成 (${resultText?.length} chars)`);
     await page.screenshot({ path: resolve(RESULT_DIR, '13-step5-analysis.png') });
 
