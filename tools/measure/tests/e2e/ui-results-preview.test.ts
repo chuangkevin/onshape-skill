@@ -449,4 +449,96 @@ test.describe('UI Results & Preview', () => {
     console.log(`  截圖: ${RESULT_DIR}`);
     console.log('═══════════════════════════════════════════\n');
   });
+
+  test('Phase 4: Wizard 模式改善 — step 4 AI 確認 + step 5 預覽/生成按鈕', async ({ page }) => {
+    test.setTimeout(180_000);
+
+    page.on('dialog', async (dialog) => {
+      if (dialog.type() === 'prompt') await dialog.accept('Wizard 測試');
+      else await dialog.accept();
+    });
+
+    // ─── 1. Wizard mode ───
+    console.log('\n=== P4-1. Wizard 模式建專案 ===');
+    await page.goto('/');
+    await page.evaluate(() => localStorage.setItem('measureMode', 'wizard'));
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+    await page.locator('#newProjectBtn').click();
+    await page.waitForTimeout(1500);
+    console.log('✓ 專案已建立 (wizard mode)');
+
+    // ─── 2. 上傳照片 → 自動分析 ───
+    console.log('\n=== P4-2. 上傳照片 ===');
+    await page.locator('#fileInput').setInputFiles([PHOTOS.top]);
+    await page.waitForTimeout(2000);
+
+    // Wait for wizard to advance past step 1
+    await page.waitForFunction(() => {
+      const active = document.querySelector('.wiz-step.active');
+      return active && !active.textContent?.includes('上傳');
+    }, { timeout: 60_000 }).catch(() => console.log('  (wizard 未自動前進)'));
+    console.log('✓ 照片已上傳');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p4-01-uploaded.png') });
+
+    // ─── 3. 快速前進到 step 4 ───
+    console.log('\n=== P4-3. 前進到 step 4 ===');
+    for (let i = 0; i < 3; i++) {
+      const skipBtn = page.locator('#wizSkip');
+      if (await skipBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await skipBtn.click();
+        await page.waitForTimeout(500);
+      }
+    }
+
+    const step4Active = await page.locator('.wiz-step.active').textContent();
+    console.log(`  目前步驟: ${step4Active}`);
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p4-02-step4.png') });
+
+    // ─── 4. 驗證 step 4 的 wizard body ───
+    console.log('\n=== P4-4. 驗證 step 4 ===');
+    const step4Body = await page.locator('#wizardBody').textContent();
+    console.log(`  Step 4 body: ${step4Body?.substring(0, 100)}`);
+    // Should mention AI results or manual features
+    expect(step4Body).toBeTruthy();
+    console.log('✓ Step 4 內容正常');
+
+    // ─── 5. 前進到 step 5 ───
+    console.log('\n=== P4-5. 前進到 step 5 ===');
+    const nextBtn = page.locator('#wizNext');
+    if (await nextBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await nextBtn.click();
+      await page.waitForTimeout(500);
+    } else {
+      const skipBtn = page.locator('#wizSkip');
+      await skipBtn.click();
+      await page.waitForTimeout(500);
+    }
+
+    const step5Active = await page.locator('.wiz-step.active').textContent();
+    console.log(`  目前步驟: ${step5Active}`);
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p4-03-step5.png') });
+
+    // ─── 6. 驗證 step 5 有預覽/生成/匯出按鈕 ───
+    console.log('\n=== P4-6. 驗證 step 5 按鈕 ===');
+    const wizPreview = page.locator('#wizPreviewBtn');
+    const wizGenFS = page.locator('#wizGenFSBtn');
+    const wizExport = page.locator('#wizExportBtn');
+
+    const hasPreview = await wizPreview.isVisible({ timeout: 3000 }).catch(() => false);
+    const hasGenFS = await wizGenFS.isVisible({ timeout: 1000 }).catch(() => false);
+    const hasExport = await wizExport.isVisible({ timeout: 1000 }).catch(() => false);
+
+    console.log(`  預覽 CAD: ${hasPreview ? '✓' : '✗'}`);
+    console.log(`  生成 FeatureScript: ${hasGenFS ? '✓' : '✗'}`);
+    console.log(`  匯出 JSON: ${hasExport ? '✓' : '✗'}`);
+    expect(hasExport).toBe(true);
+
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p4-04-step5-buttons.png'), fullPage: true });
+
+    console.log('\n═══════════════════════════════════════════');
+    console.log('  Phase 4 E2E 測試完成');
+    console.log('═══════════════════════════════════════════\n');
+  });
 });

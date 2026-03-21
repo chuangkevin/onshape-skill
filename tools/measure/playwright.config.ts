@@ -5,13 +5,13 @@ export default defineConfig({
   timeout: 60000,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:3939',
     screenshot: 'on',
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npx tsx --env-file=.env src/server/index.ts',
-    port: 3000,
+    command: 'PORT=3939 npx tsx --env-file=.env src/server/index.ts',
+    port: 3939,
     reuseExistingServer: true,
     timeout: 60000,
   },

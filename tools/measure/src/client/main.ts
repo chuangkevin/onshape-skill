@@ -1134,8 +1134,8 @@ const WIZARD_INSTRUCTIONS: Record<number, string> = {
   1: '拖曳照片到下方區域，上傳後自動開始 AI 分析...',
   2: 'AI 偵測到的比例尺如下，請確認或手動覆蓋',
   3: 'AI 偵測到的輪廓如下，請確認、微調或重繪',
-  4: '（選填）補充圓孔等特徵，或輸入卡尺尺寸',
-  5: '確認無誤後，點擊匯出 JSON',
+  4: '確認 AI 偵測結果，可勾選/編輯後進入下一步',
+  5: '預覽 CAD 模型或生成 FeatureScript，確認後匯出',
 };
 
 function updateWizard(): void {
@@ -1224,10 +1224,22 @@ function updateWizard(): void {
         activateTool('polyline', true);
       }
     }
+  } else if (wizardStep === 4) {
+    // Show AI results confirmation in wizard body
+    if (confirmedItems.length > 0) {
+      bodyHtml = `<p>請確認以下 AI 偵測結果（可勾選/編輯）：</p>`;
+    } else {
+      bodyHtml = `<p>（選填）補充圓孔等特徵，或輸入卡尺尺寸</p>`;
+    }
+    // Also render AI results panel in the sidebar
+    renderAiResultsPanel();
   } else if (wizardStep === 5) {
+    const hasContour = (store.getActivePhoto()?.drawings?.length || 0) > 0;
     bodyHtml = `
-      <p>確認無誤後，點擊匯出</p>
-      <div style="margin-top:12px;">
+      <p>預覽、生成程式碼或匯出</p>
+      <div style="margin-top:12px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+        <button type="button" class="tool-btn" id="wizPreviewBtn" ${hasContour ? '' : 'disabled'}>預覽 CAD</button>
+        <button type="button" class="tool-btn" id="wizGenFSBtn">生成 FeatureScript</button>
         <button type="button" class="tool-btn primary" id="wizExportBtn">匯出 JSON</button>
         <button type="button" class="tool-btn" id="wizCopyBtn">複製 JSON</button>
       </div>`;
@@ -1292,6 +1304,12 @@ function updateWizard(): void {
       activateTool('polyline', true);
     });
   } else if (wizardStep === 5) {
+    document.getElementById('wizPreviewBtn')?.addEventListener('click', () => {
+      previewCadBtn.click();
+    });
+    document.getElementById('wizGenFSBtn')?.addEventListener('click', () => {
+      genFeatureScriptBtn.click();
+    });
     document.getElementById('wizExportBtn')?.addEventListener('click', () => {
       document.getElementById('exportBtn')!.click();
     });
