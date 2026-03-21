@@ -39,7 +39,7 @@
 - [x] 5.2 Implement photo upload (drag-and-drop + file picker) with thumbnail gallery
 - [x] 5.3 Implement PhotoLayer.ts: render photo on Canvas with pan (space+drag) and zoom (scroll wheel)
 - [x] 5.4 Implement view angle tagging UI (top/side/front/back/close-up selector)
-- [ ] 5.5 Test: E2E test for photo upload and display
+- [x] 5.5 Test: E2E test for photo upload and display
 
 ## 6. Frontend - Drawing Overlay
 
@@ -49,7 +49,7 @@
 - [x] 6.4 Implement SelectTool.ts: select, move, delete drawn shapes
 - [x] 6.5 Implement undo/redo system (Ctrl+Z / Ctrl+Y)
 - [x] 6.6 Implement overlay export (standalone PNG + composite photo+overlay)
-- [ ] 6.7 Test: E2E test for drawing tools and undo/redo
+- [x] 6.7 Test: E2E test for drawing tools and undo/redo
 
 ## 7. Frontend - Scale Calibration
 
@@ -57,7 +57,7 @@
 - [x] 7.2 Implement px/mm conversion and display scale bar
 - [x] 7.3 Wire scale to all drawing coordinates (show mm values on hover)
 - [x] 7.4 Implement per-photo calibration storage
-- [ ] 7.5 Test: E2E test for scale calibration and coordinate conversion
+- [x] 7.5 Test: E2E test for scale calibration and coordinate conversion
 
 ## 8. Frontend - Feature Annotation
 
@@ -65,7 +65,7 @@
 - [x] 8.2 Implement feature type selector (hole, tab, slot, connector, mounting-point, custom)
 - [x] 8.3 Implement manual dimension input panel (location + value_mm)
 - [x] 8.4 Implement feature list panel with select/edit/delete
-- [ ] 8.5 Test: E2E test for feature annotation workflow
+- [x] 8.5 Test: E2E test for feature annotation workflow
 
 ## 9. Python OpenCV Edge Detection
 
@@ -86,7 +86,7 @@
 - [x] 10.5 Implement parallel pipeline orchestrator (analyze.ts): fire all services concurrently with different keys
 - [x] 10.6 Implement retry with 429 failover
 - [x] 10.7 Implement result storage in SQLite
-- [ ] 10.8 Test: integration tests with mocked Gemini responses + one live E2E test
+- [x] 10.8 Test: integration tests with mocked Gemini responses + one live E2E test
 
 ## 11. Measurement Fusion Engine
 
@@ -103,10 +103,10 @@
 - [x] 12.2 Implement frontend "Export JSON" button (download file)
 - [x] 12.3 Implement "Copy JSON" button (clipboard)
 - [x] 12.4 Implement server-side save to specified directory path
-- [ ] 12.5 Test: E2E test for export workflow, validate JSON schema
+- [x] 12.5 Test: E2E test for export workflow, validate JSON schema
 
 ## 13. E2E Integration Test
 
-- [ ] 13.1 Full workflow E2E test: upload photo → calibrate → draw → annotate → analyze → export
-- [ ] 13.2 Test with actual L390 battery photos as fixture data
-- [ ] 13.3 Verify exported measurement.json is consumable by onshape-skill format
+- [x] 13.1 Full workflow E2E test: upload photo → calibrate → draw → annotate → analyze → export
+- [x] 13.2 Test with actual L390 battery photos as fixture data
+- [x] 13.3 Verify exported measurement.json is consumable by onshape-skill format
