@@ -8,6 +8,7 @@ import photosRouter from './routes/photos.js';
 import keysRouter from './routes/keys.js';
 import analyzeRouter from './routes/analyze.js';
 import exportRouter from './routes/exportRoute.js';
+import featurescriptRouter from './routes/featurescript.js';
 import { UPLOAD_DIR } from './routes/photos.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,7 @@ app.use('/api/projects', photosRouter);
 app.use('/api/projects', analyzeRouter);
 app.use('/api/projects', exportRouter);
 app.use('/api/keys', keysRouter);
+app.use('/api/generate-featurescript', featurescriptRouter);
 
 // Serve uploaded photos
 app.use('/uploads', express.static(UPLOAD_DIR));

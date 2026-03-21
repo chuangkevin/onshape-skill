@@ -8,6 +8,7 @@ import { activateHoleTool } from './tools/HoleTool.js';
 import { activateSelectTool } from './tools/SelectTool.js';
 import { activateEditContourTool, getContourHighlight } from './tools/EditContourTool.js';
 import * as api from './api/client.js';
+import { createCadPreview } from './preview/CadPreview.js';
 import type { ViewAngle } from '@shared/types.js';
 
 // ── DOM Elements ──
@@ -930,9 +931,67 @@ function setupEvents(): void {
   });
 
   // Next-step buttons
-  previewCadBtn.addEventListener('click', () => {
-    // Phase 2 will implement this
+  let cadPreviewInstance: { dispose: () => void } | null = null;
+
+  previewCadBtn.addEventListener('click', async () => {
+    const photo = store.getActivePhoto();
+    if (!photo?.drawings?.length) return;
+
+    // Get contour in mm
+    const contour = photo.drawings.find(d => d.type === 'polyline' && d.closed);
+    if (!contour) return;
+
+    const scale = photo.scale?.px_per_mm || 1;
+    const contour_mm = (contour.points_px || []).map((p: any) => ({
+      x: p.x / scale,
+      y: p.y / scale,
+    }));
+
+    // Get features (holes)
+    const features = (photo.features || [])
+      .filter((f: any) => f.type === 'hole' && f.center_px)
+      .map((f: any) => ({
+        type: 'hole',
+        center_mm: { x: f.center_px.x / scale, y: f.center_px.y / scale },
+        radius_mm: (f.radius_px || 5) / scale,
+      }));
+
+    // Get thickness from confirmed data or default
+    const confirmed = getConfirmedExportData();
+    const thicknessReading = confirmed.caliper_readings?.find((r: any) =>
+      r.location?.includes('厚') || r.location?.includes('thick')
+    );
+    const thickness_mm = thicknessReading?.value_mm || 5;
+
+    // Build dimensions for overlay
+    const dims: { label: string; value_mm: number }[] = [];
+    if (contour_mm.length > 0) {
+      const xs = contour_mm.map((p: any) => p.x);
+      const ys = contour_mm.map((p: any) => p.y);
+      dims.push({ label: '寬', value_mm: Math.max(...xs) - Math.min(...xs) });
+      dims.push({ label: '高', value_mm: Math.max(...ys) - Math.min(...ys) });
+      dims.push({ label: '厚', value_mm: thickness_mm });
+    }
+
+    // Cleanup previous preview
+    if (cadPreviewInstance) {
+      cadPreviewInstance.dispose();
+      cadPreviewInstance = null;
+    }
+    previewContainer.innerHTML = '';
+
     previewModal.classList.remove('hidden');
+
+    // Small delay to let modal render
+    await new Promise(r => setTimeout(r, 100));
+
+    cadPreviewInstance = createCadPreview({
+      container: previewContainer,
+      contour_mm,
+      features,
+      thickness_mm,
+      dimensions: dims,
+    });
   });
 
   genFeatureScriptBtn.addEventListener('click', async () => {
@@ -960,16 +1019,13 @@ function setupEvents(): void {
   codeModal.addEventListener('click', (e) => { if (e.target === codeModal) codeModal.classList.add('hidden'); });
 
   // Preview modal events
-  document.getElementById('previewClose')!.addEventListener('click', () => {
+  const closePreview = () => {
     previewModal.classList.add('hidden');
+    if (cadPreviewInstance) { cadPreviewInstance.dispose(); cadPreviewInstance = null; }
     previewContainer.innerHTML = '';
-  });
-  previewModal.addEventListener('click', (e) => {
-    if (e.target === previewModal) {
-      previewModal.classList.add('hidden');
-      previewContainer.innerHTML = '';
-    }
-  });
+  };
+  document.getElementById('previewClose')!.addEventListener('click', closePreview);
+  previewModal.addEventListener('click', (e) => { if (e.target === previewModal) closePreview(); });
 
   // Mouse coordinate tracking
   drawingCanvas.addEventListener('pointermove', (e) => {
@@ -1406,6 +1462,7 @@ async function init(): Promise<void> {
 
   // Expose store for E2E tests
   (window as any).__debugStore = () => store.getState();
+  (window as any).__debugStoreApi = store;
   (window as any).__debugConfirmed = () => getConfirmedExportData();
 
   // Show project landing page

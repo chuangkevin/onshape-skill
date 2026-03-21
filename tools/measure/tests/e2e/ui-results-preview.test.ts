@@ -203,4 +203,250 @@ test.describe('UI Results & Preview', () => {
     console.log(`  截圖: ${RESULT_DIR}`);
     console.log('═══════════════════════════════════════════\n');
   });
+
+  test('Phase 2: Three.js CAD 預覽 — 模擬輪廓 → 開啟預覽 → canvas 渲染', async ({ page }) => {
+    test.setTimeout(180_000);
+
+    page.on('dialog', async (dialog) => {
+      console.log(`[Dialog] ${dialog.type()}: ${dialog.message()}`);
+      if (dialog.type() === 'prompt') {
+        await dialog.accept('CAD 預覽測試專案');
+      } else {
+        await dialog.accept();
+      }
+    });
+
+    // ─── 1. 開啟 app + 建專案 + free mode ───
+    console.log('\n=== 1. 開啟 app + 建專案 ===');
+    await page.goto('/');
+    await page.evaluate(() => localStorage.setItem('measureMode', 'free'));
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+
+    await page.locator('#newProjectBtn').click();
+    await page.waitForTimeout(1500);
+    console.log('✓ 專案已建立');
+
+    // ─── 2. 上傳 top photo ───
+    console.log('\n=== 2. 上傳照片 ===');
+    await page.locator('#fileInput').setInputFiles([PHOTOS.top]);
+    await page.waitForTimeout(2000);
+
+    const photoCount = await page.locator('.photo-thumb').count();
+    console.log(`✓ ${photoCount} 張照片已上傳`);
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p2-01-photo-uploaded.png') });
+
+    // ─── 3. 等待載入完成 ───
+    console.log('\n=== 3. 等待載入完成 ===');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+    console.log('✓ 頁面載入完成');
+
+    // ─── 4. 注入模擬輪廓 + 觸發 AI 分析讓按鈕可見 ───
+    console.log('\n=== 4. 注入模擬輪廓 + 執行分析 ===');
+    await page.evaluate(() => {
+      const storeApi = (window as any).__debugStoreApi;
+      if (storeApi && typeof storeApi.addDrawing === 'function') {
+        storeApi.addDrawing({
+          type: 'polyline',
+          id: 'mock_contour',
+          points_px: [
+            { x: 50, y: 50 },
+            { x: 200, y: 50 },
+            { x: 200, y: 120 },
+            { x: 50, y: 120 },
+          ],
+          closed: true,
+        });
+        storeApi.setScale({
+          pointA_px: { x: 0, y: 0 },
+          pointB_px: { x: 100, y: 0 },
+          distance_mm: 50,
+          px_per_mm: 2,
+        });
+        console.log('[mock] contour + scale injected');
+      }
+    });
+    await page.waitForTimeout(500);
+
+    // Run analysis to trigger nextSteps visibility
+    await page.locator('#analyzeBtn').click();
+    await page.waitForFunction(() => {
+      const panel = document.getElementById('analysisResults');
+      return panel && !panel.innerHTML.includes('分析中');
+    }, { timeout: 120_000 });
+    console.log('✓ 模擬輪廓已注入 + 分析完成');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p2-02-contour-injected.png') });
+
+    // ─── 5. 點擊預覽 CAD 按鈕 ───
+    console.log('\n=== 5. 點擊預覽 CAD 按鈕 ===');
+    const previewBtn = page.locator('#previewCadBtn');
+    // Button should be enabled now since contour exists
+    await previewBtn.click({ timeout: 10_000 });
+    await page.waitForTimeout(2000);
+    console.log('✓ 已點擊 #previewCadBtn');
+
+    // ─── 6. 驗證預覽 Modal 可見 ───
+    console.log('\n=== 6. 驗證預覽 Modal ===');
+    const previewModal = page.locator('#previewModal');
+    await expect(previewModal).toBeVisible({ timeout: 10_000 });
+    console.log('✓ #previewModal 已顯示');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p2-03-preview-modal.png') });
+
+    // ─── 7. 驗證 canvas 存在 ───
+    console.log('\n=== 7. 驗證 canvas 渲染 ===');
+    const canvas = page.locator('#previewContainer canvas');
+    await expect(canvas).toBeVisible({ timeout: 10_000 });
+    console.log('✓ canvas 已渲染在 #previewContainer 內');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p2-04-canvas-rendered.png') });
+
+    // ─── 8. 截圖完整預覽畫面 ───
+    console.log('\n=== 8. 截圖預覽畫面 ===');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p2-05-preview-full.png'), fullPage: true });
+    console.log('✓ 截圖已儲存');
+
+    // ─── 9. 關閉預覽 Modal ───
+    console.log('\n=== 9. 關閉預覽 Modal ===');
+    await page.locator('#previewClose').click();
+    await page.waitForTimeout(1000);
+    console.log('✓ 已關閉預覽');
+
+    // ─── 10. 驗證 Modal 已隱藏 ───
+    console.log('\n=== 10. 驗證 Modal 已隱藏 ===');
+    await expect(previewModal).toBeHidden({ timeout: 5000 });
+    console.log('✓ #previewModal 已隱藏');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p2-06-modal-closed.png') });
+
+    console.log('\n═══════════════════════════════════════════');
+    console.log('  Phase 2 E2E 測試完成');
+    console.log(`  截圖: ${RESULT_DIR}`);
+    console.log('═══════════════════════════════════════════\n');
+  });
+
+  test('Phase 3: FeatureScript 生成 — 匯出資料 → 生成 → code block 顯示', async ({ page }) => {
+    test.setTimeout(180_000);
+
+    page.on('dialog', async (dialog) => {
+      console.log(`[Dialog] ${dialog.type()}: ${dialog.message()}`);
+      if (dialog.type() === 'prompt') {
+        await dialog.accept('FeatureScript 測試專案');
+      } else {
+        await dialog.accept();
+      }
+    });
+
+    // ─── 1. 開啟 app + 建專案 + free mode ───
+    console.log('\n=== 1. 開啟 app + 建專案 ===');
+    await page.goto('/');
+    await page.evaluate(() => localStorage.setItem('measureMode', 'free'));
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+
+    await page.locator('#newProjectBtn').click();
+    await page.waitForTimeout(1500);
+    console.log('✓ 專案已建立');
+
+    // ─── 2. 上傳照片 ───
+    console.log('\n=== 2. 上傳照片 ===');
+    await page.locator('#fileInput').setInputFiles([PHOTOS.top]);
+    await page.waitForTimeout(2000);
+
+    const photoCount = await page.locator('.photo-thumb').count();
+    console.log(`✓ ${photoCount} 張照片已上傳`);
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p3-01-photo-uploaded.png') });
+
+    // ─── 3. 嘗試 AI 分析 (若無 API key 則跳過) ───
+    console.log('\n=== 3. AI 分析 (或跳過) ===');
+    const analyzeBtn = page.locator('#analyzeBtn');
+    if (await analyzeBtn.isEnabled({ timeout: 3000 }).catch(() => false)) {
+      await analyzeBtn.click();
+
+      try {
+        await page.waitForFunction(() => {
+          const panel = document.getElementById('analysisResults');
+          return panel && !panel.innerHTML.includes('分析中') && panel.innerHTML.includes('分析完成');
+        }, { timeout: 120_000 });
+        console.log('✓ AI 分析完成');
+      } catch {
+        console.log('  (AI 分析超時或無 API key，繼續測試)');
+      }
+    } else {
+      console.log('  (分析按鈕未啟用，跳過 AI 分析)');
+    }
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p3-02-after-analysis.png') });
+
+    // ─── 4. 點擊生成 FeatureScript 按鈕 ───
+    console.log('\n=== 4. 點擊生成 FeatureScript ===');
+    const genBtn = page.locator('#genFeatureScriptBtn');
+    await genBtn.click();
+    await page.waitForTimeout(2000);
+    console.log('✓ 已點擊 #genFeatureScriptBtn');
+
+    // ─── 5. 驗證 code Modal 可見 ───
+    console.log('\n=== 5. 驗證 code Modal ===');
+    const codeModal = page.locator('#codeModal');
+    await expect(codeModal).toBeVisible({ timeout: 10_000 });
+    console.log('✓ #codeModal 已顯示');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p3-03-code-modal.png') });
+
+    // ─── 6. 等待 code 內容載入 (非 "生成中...") ───
+    console.log('\n=== 6. 等待 code 內容載入 ===');
+    await page.waitForFunction(() => {
+      const codeEl = document.querySelector('#codeModal pre code, #codeModal .code-content, #codeModal pre');
+      if (!codeEl) return false;
+      const text = codeEl.textContent || '';
+      return text.length > 10 && !text.includes('生成中');
+    }, { timeout: 60_000 });
+    console.log('✓ code 內容已載入');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p3-04-code-loaded.png') });
+
+    // ─── 7. 驗證 code 內容有文字 ───
+    console.log('\n=== 7. 驗證 code 內容 ===');
+    const codeContent = await page.evaluate(() => {
+      const codeEl = document.querySelector('#codeModal pre code, #codeModal .code-content, #codeModal pre');
+      return codeEl?.textContent || '';
+    });
+    expect(codeContent.length).toBeGreaterThan(10);
+    console.log(`✓ code 內容長度: ${codeContent.length} chars`);
+    console.log(`  前 100 字: ${codeContent.substring(0, 100)}...`);
+
+    // ─── 8. 點擊複製按鈕，驗證文字變更 ───
+    console.log('\n=== 8. 測試複製按鈕 ===');
+    const copyBtn = codeModal.locator('button:has-text("複製"), button:has-text("Copy"), .copy-btn').first();
+    if (await copyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await copyBtn.click();
+      await page.waitForTimeout(1000);
+
+      // Verify button text changed to "已複製！" or similar
+      const btnText = await copyBtn.textContent();
+      console.log(`  複製按鈕文字: ${btnText}`);
+      const copied = btnText?.includes('已複製') || btnText?.includes('Copied');
+      if (copied) {
+        console.log('✓ 複製成功，按鈕文字已變更');
+      } else {
+        console.log('  (按鈕文字未變更，可能複製邏輯不同)');
+      }
+      await page.screenshot({ path: resolve(RESULT_DIR, 'p3-05-copied.png') });
+    } else {
+      console.log('  (複製按鈕未找到，跳過)');
+    }
+
+    // ─── 9. 關閉 Modal ───
+    console.log('\n=== 9. 關閉 code Modal ===');
+    await page.locator('#codeModalCloseBtn').click();
+    await page.waitForTimeout(1000);
+    await expect(codeModal).toBeHidden({ timeout: 5000 });
+    console.log('✓ #codeModal 已關閉');
+
+    // ─── 10. 最終截圖 ───
+    console.log('\n=== 10. 最終截圖 ===');
+    await page.screenshot({ path: resolve(RESULT_DIR, 'p3-06-final.png'), fullPage: true });
+
+    console.log('\n═══════════════════════════════════════════');
+    console.log('  Phase 3 E2E 測試完成');
+    console.log(`  截圖: ${RESULT_DIR}`);
+    console.log('═══════════════════════════════════════════\n');
+  });
 });

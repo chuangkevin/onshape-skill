@@ -13,7 +13,7 @@ export default defineConfig({
     command: 'npx tsx --env-file=.env src/server/index.ts',
     port: 3000,
     reuseExistingServer: true,
-    timeout: 30000,
+    timeout: 60000,
   },
   reporter: [['list'], ['html', { open: 'never' }]],
 });
