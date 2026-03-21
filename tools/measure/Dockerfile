@@ -29,7 +29,7 @@ RUN npx vite build
 # Persistent data lives in a volume
 RUN mkdir -p /app/data
 
-EXPOSE 8123
+EXPOSE 6123
 
-ENV PORT=8123
+ENV PORT=6123
 CMD ["node", "--import", "tsx", "src/server/index.ts"]

@@ -2,12 +2,12 @@ services:
   photo-measure:
     image: kevin950805/onshape-measure:latest
     ports:
-      - "8123:8123"
+      - "6123:6123"
     volumes:
       - measure-data:/app/data
     environment:
       - NODE_ENV=production
-      - PORT=8123
+      - PORT=6123
       - PYTHON_PATH=/usr/bin/python3
     restart: unless-stopped
 

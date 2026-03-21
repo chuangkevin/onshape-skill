@@ -93,11 +93,11 @@ jobs:
 
             echo "Waiting for port release..."
             for i in 1 2 3 4 5 6; do
-              if ! ss -tlnp | grep -q ":8123 "; then
-                echo "Port 8123 is free"
+              if ! ss -tlnp | grep -q ":6123 "; then
+                echo "Port 6123 is free"
                 break
               fi
-              echo "Port 8123 still in use, waiting... ($i/6)"
+              echo "Port 6123 still in use, waiting... ($i/6)"
               sleep 5
             done
 
@@ -115,7 +115,7 @@ jobs:
         run: |
           echo "Performing health check..."
           sleep 10
-          curl -f http://${{ secrets.DEPLOY_SERVER_IP }}:8123/api/health || exit 1
+          curl -f http://${{ secrets.DEPLOY_SERVER_IP }}:6123/api/health || exit 1
           echo "Health check passed!"
 
       - name: Deployment Summary
@@ -126,7 +126,7 @@ jobs:
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Server**: \`${{ secrets.DEPLOY_SERVER_IP }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: \`${{ env.DOCKERHUB_USERNAME }}/onshape-measure:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Port**: 8123" >> $GITHUB_STEP_SUMMARY
+          echo "- **Port**: 6123" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Deployed at: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
 
