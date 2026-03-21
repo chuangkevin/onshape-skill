@@ -98,6 +98,9 @@ jobs:
             echo "Stopping existing containers..."
             docker compose -f docker-compose.yml down --remove-orphans --volumes=false
 
+            echo "Waiting for port release..."
+            sleep 5
+
             echo "Starting updated containers..."
             docker compose -f docker-compose.yml up -d --force-recreate
 
