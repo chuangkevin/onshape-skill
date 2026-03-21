@@ -88,6 +88,9 @@ jobs:
 
             retry_pull
 
+            echo "Force removing any leftover containers..."
+            docker rm -f onshape-skill-photo-measure-1 2>/dev/null || true
+
             echo "Stopping existing containers..."
             docker compose -f docker-compose.yml down --remove-orphans --volumes=false
 
