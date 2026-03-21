@@ -88,12 +88,17 @@ jobs:
 
             retry_pull
 
+            echo "Checking what is on port 8123..."
+            ss -tlnp | grep 8123 || echo "Nothing found on ss"
+            docker ps --filter "publish=8123" --format "{{.ID}} {{.Names}} {{.Image}}" || true
+
             echo "Killing any process on port 8123..."
             sudo fuser -k 8123/tcp 2>/dev/null || true
+            sleep 2
 
-            echo "Force removing any leftover containers..."
-            docker ps -a --filter "publish=8123" -q | xargs -r docker rm -f 2>/dev/null || true
-            docker rm -f onshape-skill-photo-measure-1 2>/dev/null || true
+            echo "Force removing any Docker containers on port 8123..."
+            docker ps -a -q --filter "publish=8123" | xargs -r docker rm -f 2>/dev/null || true
+            docker rm -f onshape-skill-photo-measure-1 photo-measure 2>/dev/null || true
 
             echo "Stopping existing containers..."
             docker compose -f docker-compose.yml down --remove-orphans --volumes=false
