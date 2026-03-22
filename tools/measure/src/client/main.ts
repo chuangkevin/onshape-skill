@@ -92,26 +92,38 @@ const drawingLayer = new DrawingLayer(drawingCanvas, photoLayer);
 // Attach pan/zoom events to drawingCanvas (the top layer that receives events)
 photoLayer.attachEvents(drawingCanvas);
 
-// Auto-advance when state changes + sync scale to DB
+// Auto-advance when state changes + sync scale to DB + refresh UI
 let _lastScaleJson = '';
+let _renderScheduled = false;
+let _isRendering = false;
+
 store.subscribe(() => {
   autoAdvance();
-  // Wizard auto-advance: only advance the CURRENT step, never skip
-  const photo = store.getActivePhoto();
-  const state = store.getState();
-  if (wizardStep === 1 && state.photos.length > 0) {
-    // Don't auto-advance step 1 here — wait for SSE analysis to complete
-  }
-  // Only auto-advance step 2 when user manually sets scale (not during SSE)
-  // Step 3: just refresh display when drawings change (user must click confirm)
 
   // Sync scale to DB whenever it changes
+  const photo = store.getActivePhoto();
+  const state = store.getState();
   if (photo?.scale && state.projectId) {
     const scaleJson = JSON.stringify(photo.scale);
     if (scaleJson !== _lastScaleJson) {
       _lastScaleJson = scaleJson;
       api.updatePhoto(state.projectId, photo.id, { scale_data: scaleJson });
     }
+  }
+
+  // Debounced renderUI + updateWizard on every store change
+  if (!_renderScheduled && !_isRendering) {
+    _renderScheduled = true;
+    requestAnimationFrame(() => {
+      _renderScheduled = false;
+      _isRendering = true;
+      try {
+        renderUI();
+        if (currentMode === 'wizard') updateWizard();
+      } finally {
+        _isRendering = false;
+      }
+    });
   }
 });
 
@@ -380,6 +392,7 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
             points_px: largest.contour_px,
             closed: true,
           });
+          renderDrawings();
         }
       }
     }
@@ -590,19 +603,20 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
   }
 
   const uploaded = await api.uploadPhotos(projectId, files);
-  const photos: PhotoState[] = [
-    ...store.getState().photos,
-    ...uploaded.map((p) => ({
-      id: p.id,
-      filename: p.filename,
-      originalName: p.original_name,
-      angle: (p.angle || 'top') as ViewAngle,
-      scale: null,
-      drawings: [],
-      features: [],
-      dimensions: [],
-    })),
-  ];
+  const isNewProject = !state.projectId;
+  const newPhotos = uploaded.map((p) => ({
+    id: p.id,
+    filename: p.filename,
+    originalName: p.original_name,
+    angle: (p.angle || 'top') as ViewAngle,
+    scale: null,
+    drawings: [],
+    features: [],
+    dimensions: [],
+  }));
+  const photos: PhotoState[] = isNewProject
+    ? newPhotos
+    : [...store.getState().photos, ...newPhotos];
   store.setPhotos(photos);
   await loadPhoto(photos[photos.length - 1]);
   renderUI();
