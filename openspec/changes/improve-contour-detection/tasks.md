@@ -15,8 +15,8 @@
 
 ## 3. 三層 Fallback 管線
 
-- [x] 3.1 重構 `autoAnalyze.ts` Phase 2：先呼叫 `detectContourWithGemini()`
-- [x] 3.2 Gemini 失敗時 fallback 到 `detectEdges()`（OpenCV）
+- [x] 3.1 重構 `autoAnalyze.ts` Phase 2：OpenCV bbox ROI 優先，Gemini 輪廓作為 fallback
+- [x] 3.2 OpenCV 失敗時 fallback 到 `detectContourWithGemini()`
 - [x] 3.3 兩者都失敗時回傳 `{ contours: [], method: "none" }`
 - [x] 3.4 SSE 事件加入 `method` 欄位標示偵測方式來源
 
@@ -24,5 +24,12 @@
 
 - [x] 4.1 Build 成功（vite build 無錯誤）
 - [x] 4.2 E2E 測試無回歸（14/14 passed）
-- [ ] 4.3 部署到生產環境
-- [ ] 4.4 手動測試：上傳電池照片 → 確認 Gemini 偵測到輪廓
+- [ ] 4.3 部署到生產環境（Docker 有 Python，OpenCV 可運作）
+- [ ] 4.4 手動測試：上傳電池照片 → 確認 OpenCV+bbox ROI 偵測到輪廓
+
+## 備註
+
+- Gemini 輪廓品質不佳（只回傳粗略矩形），已改為 OpenCV bbox ROI 優先
+- 本地無 Python 無法測試 OpenCV，需在 Docker 環境驗證
+- Gemini prompt 已優化：限制 20-80 點，強調追蹤實際邊緣而非矩形
+- contour.ts 加入點數上限(200)防護，超過自動降採樣

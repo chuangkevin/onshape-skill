@@ -19,28 +19,17 @@ export interface GeminiContourResult {
 // ---------------------------------------------------------------------------
 
 const CONTOUR_PROMPT = `\
-You are analyzing a photo of a physical object placed on a surface.
+Analyze this photo. Find the MAIN physical object (ignore rulers, fingers, table, background).
 
-Your task: Find the MAIN OBJECT in the image (not the ruler, not the background, not fingers, not the table) and return its outline as pixel coordinate points.
+Trace its outline as 20-80 coordinate points along the ACTUAL visible edge — not a bounding box.
+Follow the real shape: notches, tabs, connectors, curves, indentations.
+Place more points at corners/curves, fewer on straight edges.
+Clockwise from top-left. Pixel coordinates (origin top-left, x→right, y→down).
 
-Instructions:
-1. Identify the main physical object(s) in the image.
-2. Trace the actual physical outline of each object as a series of (x, y) pixel coordinates, going clockwise starting from the top-left-most point.
-3. The image origin (0,0) is at the top-left corner. x increases to the right, y increases downward.
-4. Use 10-50 points for simple shapes (rectangles, circles), more for complex or irregular outlines.
-5. Points should lie on the actual visible edge of the object, not a bounding box.
+Reply with ONLY JSON, no markdown:
+{"found":true,"contours":[{"label":"name","contour_px":[{"x":10,"y":20},{"x":50,"y":20},{"x":55,"y":25},{"x":55,"y":80},{"x":10,"y":80}]}]}
 
-Respond ONLY with a single JSON object (no markdown, no explanation):
-
-If object(s) found:
-{"found":true,"contours":[{"label":"laptop battery","contour_px":[{"x":100,"y":50},{"x":800,"y":50},{"x":800,"y":300},{"x":100,"y":300}]}]}
-
-If multiple distinct parts are visible, include all of them sorted by area (largest first).
-
-If NO clear object is found:
-{"found":false,"contours":[]}
-
-IMPORTANT: respond ONLY with JSON, no markdown.`;
+If no object: {"found":false,"contours":[]}`;
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -95,14 +84,23 @@ export async function detectContourWithGemini(
     return { found: false, contours: [], method: 'gemini' };
   }
 
-  console.log(`[contour-gemini] Detected ${validContours.length} contour(s)`);
+  // Subsample if too many points (Gemini sometimes generates hundreds)
+  const MAX_POINTS = 200;
+  const processedContours = validContours.map((c: any) => {
+    let points: Array<{ x: number; y: number }> = c.contour_px.map((pt: any) => ({ x: pt.x, y: pt.y }));
+    if (points.length > MAX_POINTS) {
+      const step = points.length / MAX_POINTS;
+      points = Array.from({ length: MAX_POINTS }, (_, i) => points[Math.floor(i * step)]);
+      console.log(`[contour-gemini] Subsampled ${c.contour_px.length} → ${MAX_POINTS} points`);
+    }
+    return { label: c.label as string | undefined, contour_px: points };
+  });
+
+  console.log(`[contour-gemini] Detected ${processedContours.length} contour(s), points: ${processedContours.map(c => c.contour_px.length).join(',')}`);
 
   return {
     found: true,
-    contours: validContours.map((c: any) => ({
-      label: c.label as string | undefined,
-      contour_px: c.contour_px.map((pt: any) => ({ x: pt.x, y: pt.y })),
-    })),
+    contours: processedContours,
     method: 'gemini',
   };
 }
