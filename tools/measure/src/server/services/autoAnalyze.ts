@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { getDb } from '../db.js';
 import { detectRuler, detectObjectBBox } from './ruler.js';
 import { detectEdges } from './opencv.js';
+import { detectContourWithGemini } from './contour.js';
 import { extractLabels } from './search.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
 
@@ -27,8 +28,8 @@ export async function runAutoAnalysis(
   photoId: number,
 ): Promise<void> {
   const timeout = setTimeout(() => {
-    emitError(res, 'Auto-analysis timed out after 30 seconds');
-  }, 30_000);
+    emitError(res, 'Auto-analysis timed out after 60 seconds');
+  }, 60_000);
 
   try {
     const db = getDb();
@@ -58,15 +59,50 @@ export async function runAutoAnalysis(
         .catch((e) => { emit(res, 'labels', 'error', { error: e.message }); return null; }),
     ]);
 
-    // Phase 2: OpenCV with bbox as ROI (sequential, depends on bbox)
+    // Phase 2: Three-layer fallback contour detection
+    // Layer 1: Gemini polygon → Layer 2: OpenCV edge → Layer 3: empty result
     emit(res, 'contour', 'running');
-    const roi = bboxResult?.found
-      ? { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! }
-      : undefined;
 
-    const contourResult = await detectEdges(imagePath, roi, 0.003)
-      .then((r) => { emit(res, 'contour', 'done', r); return r; })
-      .catch((e) => { emit(res, 'contour', 'error', { error: e.message }); return null; });
+    let contourResult: any = null;
+    let contourMethod: 'gemini' | 'opencv' | 'none' = 'none';
+
+    // Layer 1: Gemini contour detection
+    try {
+      const geminiContour = await detectContourWithGemini(imagePath, projectId);
+      if (geminiContour.found && geminiContour.contours.length > 0) {
+        contourMethod = 'gemini';
+        contourResult = { ...geminiContour, method: 'gemini' };
+        console.log(`[autoAnalyze] Contour detected via Gemini (${geminiContour.contours.length} contour(s))`);
+        emit(res, 'contour', 'done', contourResult);
+      }
+    } catch (e: any) {
+      console.warn('[autoAnalyze] Gemini contour failed, falling back to OpenCV:', e.message);
+    }
+
+    // Layer 2: OpenCV edge detection (fallback)
+    if (!contourResult) {
+      try {
+        const roi = bboxResult?.found
+          ? { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! }
+          : undefined;
+        const opencvResult = await detectEdges(imagePath, roi, 0.003);
+        if (opencvResult && opencvResult.contours && opencvResult.contours.length > 0) {
+          contourMethod = 'opencv';
+          contourResult = { ...opencvResult, method: 'opencv' };
+          console.log(`[autoAnalyze] Contour detected via OpenCV (${opencvResult.contours.length} contour(s))`);
+          emit(res, 'contour', 'done', contourResult);
+        }
+      } catch (e: any) {
+        console.warn('[autoAnalyze] OpenCV contour also failed:', e.message);
+      }
+    }
+
+    // Layer 3: No contour detected
+    if (!contourResult) {
+      contourResult = { contours: [], method: 'none' };
+      console.log('[autoAnalyze] No contour detected by any method');
+      emit(res, 'contour', 'done', contourResult);
+    }
 
     // Store results
     const combined = { ruler: rulerResult, bbox: bboxResult, contour: contourResult, labels: labelResult };

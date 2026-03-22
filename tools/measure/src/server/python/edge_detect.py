@@ -64,14 +64,18 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
+    # CLAHE contrast enhancement for low-contrast objects
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
     # Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
     # Canny edge detection
-    edges = cv2.Canny(blurred, 50, 150)
+    edges = cv2.Canny(blurred, 30, 100)
 
     # Dilate to close gaps
-    kernel = np.ones((3, 3), np.uint8)
+    kernel = np.ones((5, 5), np.uint8)
     edges = cv2.dilate(edges, kernel, iterations=1)
 
     # Find contours
@@ -79,7 +83,7 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
 
     # Filter and simplify contours
     contours_result = []
-    min_area = img.shape[0] * img.shape[1] * 0.001  # Minimum 0.1% of image area
+    min_area = img.shape[0] * img.shape[1] * 0.0001  # Minimum 0.01% of image area
 
     for contour in contours_raw:
         area = cv2.contourArea(contour)
