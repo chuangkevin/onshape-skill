@@ -145,20 +145,74 @@ def main():
         output_error(f"mask_extract_error: {exc}")
         sys.exit(0)
 
-    # --- Select largest segment by mask area ---
+    # --- Select best segment (largest that isn't background) ---
     try:
         import numpy as np
 
-        areas = [float(mask_data[i].sum()) for i in range(len(mask_data))]
-        best_idx = int(np.argmax(areas))
-        best_mask = (mask_data[best_idx] > 0.5).astype(np.uint8) * 255
-        best_conf = float(confs[best_idx]) if confs is not None and best_idx < len(confs) else 0.0
-        best_area = areas[best_idx]
+        total_pixels = float(infer_h * infer_w)
+
+        # Collect all significant masks (0.5%–85% of image)
+        significant = []
+        for i in range(len(mask_data)):
+            area_ratio = float(mask_data[i].sum()) / total_pixels
+            if 0.005 <= area_ratio <= 0.85:
+                conf = float(confs[i]) if confs is not None and i < len(confs) else 0.5
+                significant.append((i, area_ratio, conf))
+
+        if not significant:
+            print(json.dumps({"contours": [], "image_size": {"width": full_w, "height": full_h}}))
+            sys.exit(0)
+
+        # Check if largest mask covers > 40% — if so, it's clearly the main object
+        significant.sort(key=lambda x: x[1], reverse=True)
+        largest_ratio = significant[0][1]
+
+        if roi is not None:
+            # With ROI: object is spatially confined — use convex hull of all segments
+            # to get the complete object outline even when it's fragmented (e.g. keyboard)
+            all_pts = []
+            for i, ratio, _ in significant:
+                m = (mask_data[i] > 0.5).astype(np.uint8)
+                if m.shape[:2] != (infer_h, infer_w):
+                    m = cv2.resize(m, (infer_w, infer_h), interpolation=cv2.INTER_NEAREST)
+                ctrs, _ = cv2.findContours(m * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for c in ctrs:
+                    all_pts.append(c)
+
+            if not all_pts:
+                print(json.dumps({"contours": [], "image_size": {"width": full_w, "height": full_h}}))
+                sys.exit(0)
+
+            all_pts_np = np.vstack(all_pts)
+            hull = cv2.convexHull(all_pts_np)
+            # Build output directly from hull — add ROI offset and scale
+            hull_points = [
+                [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
+                for p in hull
+            ]
+            output = {
+                "contours": [
+                    {
+                        "contour_px": hull_points,
+                        "confidence": float(np.mean([c for _, _, c in significant])),
+                        "area_px": float(cv2.contourArea(hull)),
+                    }
+                ],
+                "image_size": {"width": full_w, "height": full_h},
+            }
+            print(json.dumps(output))
+            sys.exit(0)
+        else:
+            # Without ROI: pick the single largest significant mask
+            best_idx = significant[0][0]
+            best_conf = significant[0][2]
+            best_mask = (mask_data[best_idx] > 0.5).astype(np.uint8) * 255
+            best_area = float(mask_data[best_idx].sum())
     except Exception as exc:
         output_error(f"mask_select_error: {exc}")
         sys.exit(0)
 
-    # --- Resize mask to inference image size if needed ---
+    # --- Resize mask to inference image size if needed (single-mask path only) ---
     try:
         if best_mask.shape[:2] != (infer_h, infer_w):
             best_mask = cv2.resize(best_mask, (infer_w, infer_h), interpolation=cv2.INTER_NEAREST)

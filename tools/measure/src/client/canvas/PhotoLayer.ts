@@ -53,7 +53,7 @@ export class PhotoLayer {
     });
 
     eventTarget.addEventListener('pointerdown', (e) => {
-      if (this.spaceDown || e.button === 1 || (e.ctrlKey && e.button === 0)) {
+      if (this.spaceDown || e.button === 1 || e.button === 2 || (e.ctrlKey && e.button === 0)) {
         this.isPanning = true;
         this.panStartX = e.clientX - this._offsetX;
         this.panStartY = e.clientY - this._offsetY;
@@ -78,6 +78,9 @@ export class PhotoLayer {
         eventTarget.style.cursor = this.spaceDown ? 'grab' : 'crosshair';
       }
     });
+
+    // Prevent right-click context menu so right-drag pan works smoothly
+    eventTarget.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   get isPanningNow(): boolean {
