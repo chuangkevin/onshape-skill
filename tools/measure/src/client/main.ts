@@ -478,7 +478,8 @@ function updateContourSourceLabel(source: 'fastsam' | 'web-calibrated' | 'opencv
 }
 
 // ── Landing Page Logic ──
-async function showLanding(): Promise<void> {
+async function showLanding(pushHistory = true): Promise<void> {
+  if (pushHistory) history.pushState({}, '', '/');
   projectLanding.classList.remove('hidden');
   // Hide workspace elements
   const mainEl = document.querySelector('.main') as HTMLElement;
@@ -504,11 +505,12 @@ async function showLanding(): Promise<void> {
   `).join('');
 }
 
-async function openProject(projectId: number): Promise<void> {
+async function openProject(projectId: number, pushHistory = true): Promise<void> {
   const projects = await api.listProjects();
   const project = projects.find(p => p.id === projectId);
   if (!project) return;
 
+  if (pushHistory) history.pushState({ projectId }, '', `/projects/${projectId}`);
   store.setProject(project.id, project.name);
 
   const photos = await api.listPhotos(project.id);
@@ -1146,7 +1148,17 @@ function setupEvents(): void {
 
   // Back to landing
   backToLanding.addEventListener('click', () => {
-    showLanding();
+    showLanding(); // pushHistory = true
+  });
+
+  // Browser back/forward
+  window.addEventListener('popstate', async (e) => {
+    const pid = e.state?.projectId;
+    if (pid) {
+      await openProject(pid, false);
+    } else {
+      await showLanding(false);
+    }
   });
 }
 
@@ -1551,8 +1563,13 @@ async function init(): Promise<void> {
   (window as any).__debugConfirmed = () => getConfirmedExportData();
   (window as any).__debugRenderUI = renderUI;
 
-  // Show project landing page
-  await showLanding();
+  // Route based on initial URL
+  const pathMatch = window.location.pathname.match(/^\/projects\/(\d+)/);
+  if (pathMatch) {
+    await openProject(parseInt(pathMatch[1]), false);
+  } else {
+    await showLanding(false);
+  }
 
   // Now wizard is ready to auto-advance from user actions (not init data)
   wizardReady = true;
