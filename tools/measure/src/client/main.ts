@@ -522,6 +522,11 @@ async function openProject(projectId: number): Promise<void> {
     await loadPhoto(store.getActivePhoto()!);
   } else {
     store.setPhotos([]);
+    // Clear the photo canvas so the previous project's image doesn't bleed through
+    const ctx = photoCanvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, photoCanvas.width, photoCanvas.height);
+    const dctx = drawingCanvas.getContext('2d');
+    if (dctx) dctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
   }
 
   // Hide landing, show workspace

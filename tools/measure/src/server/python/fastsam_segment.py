@@ -191,7 +191,7 @@ def main():
     # --- Simplify polygon ---
     try:
         perimeter = cv2.arcLength(largest_contour, closed=True)
-        epsilon = 0.005 * perimeter
+        epsilon = 0.002 * perimeter
         simplified = cv2.approxPolyDP(largest_contour, epsilon, closed=True)
         # simplified shape: (N, 1, 2) → list of [x, y] with ROI offset applied
         points = [
