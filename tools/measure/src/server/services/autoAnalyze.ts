@@ -37,6 +37,44 @@ function emitContourUpdate(
   res.write(`event: contour-update\ndata: ${JSON.stringify({ source, contours })}\n\n`);
 }
 
+/**
+ * Quality gate for contour results.
+ * Returns false (reject) if:
+ *   - Fewer than 6 points in the first contour
+ *   - Contour bounding rect covers >85% of the reference area
+ *     (bbox area when available, else full image area)
+ */
+function isContourQualityOk(
+  contours: Array<{ contour_px: Array<{ x: number; y: number }> }>,
+  bboxResult: { found: boolean; x?: number; y?: number; width?: number; height?: number } | null,
+  imageWidth: number,
+  imageHeight: number,
+): boolean {
+  if (!contours || contours.length === 0) return false;
+  const pts = contours[0].contour_px;
+  if (!pts || pts.length < 6) {
+    console.log(`[quality] Rejected: only ${pts?.length ?? 0} points (min 6)`);
+    return false;
+  }
+
+  // Compute bounding rect of contour
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const contourArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+
+  // Reference area: bbox if found, else full image
+  const refArea = bboxResult?.found && bboxResult.width && bboxResult.height
+    ? bboxResult.width * bboxResult.height
+    : imageWidth * imageHeight;
+
+  const ratio = refArea > 0 ? contourArea / refArea : 1;
+  if (ratio > 0.85) {
+    console.log(`[quality] Rejected: contour area ratio ${ratio.toFixed(2)} > 0.85 (likely full-image garbage)`);
+    return false;
+  }
+  return true;
+}
+
 /** Extract model ID patterns like L390X45S from label strings */
 function extractModelId(labelResult: any): string | null {
   if (!labelResult) return null;
@@ -185,11 +223,18 @@ export async function runAutoAnalysis(
         .catch((e) => { emit(res, 'labels', 'error', { error: e.message }); return null; }),
     ]);
 
-    // Phase 2: Three-layer fallback contour detection
-    // Layer 0: FastSAM (fast, local) → Layer 1: OpenCV + bbox ROI → Layer 2: Gemini polygon (rough)
+    // Phase 2: Two-layer fallback contour detection
+    // Layer 0: FastSAM (fast, local, pixel-accurate) with optional bbox ROI
+    // Layer 1: Gemini polygon (semantic fallback, bbox hint in prompt)
+    // Both layers pass through a quality gate before emitting contour-update.
     emit(res, 'contour', 'running');
 
     let contourResult: any = null;
+
+    // Derive image dimensions for quality gate.
+    // FastSAM returns image_size; fall back to bbox edge as a conservative estimate.
+    let imgW = bboxResult?.found ? (bboxResult.x! + bboxResult.width!) : 0;
+    let imgH = bboxResult?.found ? (bboxResult.y! + bboxResult.height!) : 0;
 
     // Layer 0: FastSAM segmentation
     try {
@@ -197,18 +242,29 @@ export async function runAutoAnalysis(
         ? { x1: bboxResult.x!, y1: bboxResult.y!, x2: bboxResult.x! + bboxResult.width!, y2: bboxResult.y! + bboxResult.height! }
         : undefined;
       const fastSamResult = await detectContourWithFastSAM(imagePath, fastSamRoi);
+
+      // Use FastSAM's reported image size when available
+      if (fastSamResult.image_size) {
+        imgW = fastSamResult.image_size.width;
+        imgH = fastSamResult.image_size.height;
+      }
+
       if (fastSamResult.found && fastSamResult.contours.length > 0) {
-        contourResult = { ...fastSamResult, method: 'fastsam' };
-        console.log(`[autoAnalyze] Contour via FastSAM (${fastSamResult.contours.length} contour(s))`);
-        emitContourUpdate(res, 'fastsam', fastSamResult.contours);
-        // Launch Phase 2 web calibration asynchronously (fire-and-forget)
-        triggerWebCalibration(res, imagePath, labelResult, projectId);
+        if (isContourQualityOk(fastSamResult.contours, bboxResult, imgW, imgH)) {
+          contourResult = { ...fastSamResult, method: 'fastsam' };
+          console.log(`[autoAnalyze] Contour via FastSAM (${fastSamResult.contours.length} contour(s))`);
+          emitContourUpdate(res, 'fastsam', fastSamResult.contours);
+          // Launch Phase 2 web calibration asynchronously (fire-and-forget)
+          triggerWebCalibration(res, imagePath, labelResult, projectId);
+        } else {
+          console.warn('[autoAnalyze] FastSAM contour failed quality gate, trying Gemini');
+        }
       }
     } catch (e: any) {
       console.warn('[autoAnalyze] FastSAM failed, trying Gemini:', e.message);
     }
 
-    // Layer 1: Gemini contour (semantic fallback — crop to bbox ROI first for accuracy)
+    // Layer 1: Gemini contour (semantic fallback, bbox hint embedded in prompt)
     if (!contourResult) {
       try {
         const geminiRoi = bboxResult?.found
@@ -216,9 +272,13 @@ export async function runAutoAnalysis(
           : undefined;
         const geminiContour = await detectContourWithGemini(imagePath, projectId, geminiRoi);
         if (geminiContour.found && geminiContour.contours.length > 0) {
-          contourResult = { ...geminiContour, method: 'gemini' };
-          console.log(`[autoAnalyze] Contour via Gemini (${geminiContour.contours.length} contour(s))`);
-          emitContourUpdate(res, 'gemini', geminiContour.contours);
+          if (isContourQualityOk(geminiContour.contours, bboxResult, imgW, imgH)) {
+            contourResult = { ...geminiContour, method: 'gemini' };
+            console.log(`[autoAnalyze] Contour via Gemini (${geminiContour.contours.length} contour(s))`);
+            emitContourUpdate(res, 'gemini', geminiContour.contours);
+          } else {
+            console.warn('[autoAnalyze] Gemini contour failed quality gate');
+          }
         }
       } catch (e: any) {
         console.warn('[autoAnalyze] Gemini contour also failed:', e.message);

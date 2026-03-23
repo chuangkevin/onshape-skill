@@ -7,6 +7,13 @@ Usage:
 
 Output (stdout): JSON with contours, image_size.
 On error: JSON with error message and empty contours.
+
+Model resolution order:
+  1. --model argument (if file exists)
+  2. FastSAM-s.pt next to this script
+  3. FastSAM-s.pt in cwd
+  4. Auto-download via ultralytics (saved next to this script for reuse)
+  If download fails, outputs {"error": "fastsam_unavailable"}.
 """
 
 import argparse
@@ -32,17 +39,40 @@ def parse_args():
 
 
 def resolve_model_path(model_arg: str) -> str | None:
-    """Return a valid model path, or None if no model file is found."""
+    """Return a valid model path, or None if the model cannot be found or downloaded.
+
+    Resolution order:
+    1. model_arg (if file exists)
+    2. FastSAM-s.pt next to this script
+    3. FastSAM-s.pt in cwd
+    4. Auto-download via ultralytics into the script directory
+       (download is skipped and None returned on any failure)
+    """
+    # 1. Explicit path
     if os.path.isfile(model_arg):
         return model_arg
-    # Check next to this script file (works when spawned from any working directory)
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    for candidate in [
-        os.path.join(script_dir, "FastSAM-s.pt"),
-        os.path.join(os.getcwd(), "FastSAM-s.pt"),
-    ]:
-        if os.path.isfile(candidate):
-            return candidate
+
+    # 2. Next to this script
+    local_path = os.path.join(script_dir, "FastSAM-s.pt")
+    if os.path.isfile(local_path):
+        return local_path
+
+    # 3. Current working directory
+    cwd_path = os.path.join(os.getcwd(), "FastSAM-s.pt")
+    if os.path.isfile(cwd_path):
+        return cwd_path
+
+    # 4. Auto-download (requires ultralytics to already be importable)
+    try:
+        from ultralytics.utils.downloads import attempt_download_asset  # type: ignore
+        downloaded = attempt_download_asset("FastSAM-s.pt")
+        if downloaded and os.path.isfile(str(downloaded)):
+            return str(downloaded)
+    except Exception:
+        pass
+
     return None
 
 
@@ -61,6 +91,9 @@ def output_error(message: str):
     print(json.dumps({"error": message, "contours": []}))
 
 
+MIN_CONTOUR_POINTS = 6
+
+
 def main():
     args = parse_args()
 
@@ -73,7 +106,7 @@ def main():
         print(json.dumps({"error": "fastsam_unavailable"}))
         sys.exit(0)
 
-    # --- Resolve model path ---
+    # --- Resolve model path (auto-download if needed) ---
     model_path = resolve_model_path(args.model)
     if model_path is None:
         print(json.dumps({"error": "fastsam_unavailable"}))
@@ -112,6 +145,7 @@ def main():
         y_offset = y1
 
     infer_h, infer_w = image_bgr.shape[:2]
+    image_size = {"width": full_w, "height": full_h}
 
     # --- Run FastSAM inference (CPU only) ---
     try:
@@ -132,14 +166,7 @@ def main():
     try:
         masks = results[0].masks
         if masks is None or len(masks) == 0:
-            print(
-                json.dumps(
-                    {
-                        "contours": [],
-                        "image_size": {"width": full_w, "height": full_h},
-                    }
-                )
-            )
+            print(json.dumps({"contours": [], "image_size": image_size}))
             sys.exit(0)
 
         # Confidence scores (boxes.conf) aligned with masks
@@ -151,8 +178,6 @@ def main():
 
     # --- Select best segment (largest that isn't background) ---
     try:
-        import numpy as np
-
         total_pixels = float(infer_h * infer_w)
 
         # Collect all significant masks (0.5%–85% of image)
@@ -164,16 +189,14 @@ def main():
                 significant.append((i, area_ratio, conf))
 
         if not significant:
-            print(json.dumps({"contours": [], "image_size": {"width": full_w, "height": full_h}}))
+            print(json.dumps({"contours": [], "image_size": image_size}))
             sys.exit(0)
 
-        # Check if largest mask covers > 40% — if so, it's clearly the main object
         significant.sort(key=lambda x: x[1], reverse=True)
-        largest_ratio = significant[0][1]
 
         if roi is not None:
-            # With ROI: object is spatially confined — use convex hull of all segments
-            # to get the complete object outline even when it's fragmented (e.g. keyboard)
+            # With ROI: use convex hull of all significant segments
+            # to get the complete object outline even when fragmented (e.g. keyboard keys)
             all_pts = []
             for i, ratio, _ in significant:
                 m = (mask_data[i] > 0.5).astype(np.uint8)
@@ -184,16 +207,21 @@ def main():
                     all_pts.append(c)
 
             if not all_pts:
-                print(json.dumps({"contours": [], "image_size": {"width": full_w, "height": full_h}}))
+                print(json.dumps({"contours": [], "image_size": image_size}))
                 sys.exit(0)
 
             all_pts_np = np.vstack(all_pts)
             hull = cv2.convexHull(all_pts_np)
-            # Build output directly from hull — add ROI offset and scale
             hull_points = [
                 [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
                 for p in hull
             ]
+
+            # Quality gate: reject if too few points
+            if len(hull_points) < MIN_CONTOUR_POINTS:
+                print(json.dumps({"contours": [], "image_size": image_size}))
+                sys.exit(0)
+
             output = {
                 "contours": [
                     {
@@ -202,7 +230,7 @@ def main():
                         "area_px": float(cv2.contourArea(hull)),
                     }
                 ],
-                "image_size": {"width": full_w, "height": full_h},
+                "image_size": image_size,
             }
             print(json.dumps(output))
             sys.exit(0)
@@ -230,17 +258,9 @@ def main():
             best_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
         )
         if not contours_raw:
-            print(
-                json.dumps(
-                    {
-                        "contours": [],
-                        "image_size": {"width": full_w, "height": full_h},
-                    }
-                )
-            )
+            print(json.dumps({"contours": [], "image_size": image_size}))
             sys.exit(0)
 
-        # Take the largest contour by area in case of fragments
         largest_contour = max(contours_raw, key=cv2.contourArea)
     except Exception as exc:
         output_error(f"contour_extract_error: {exc}")
@@ -251,13 +271,17 @@ def main():
         perimeter = cv2.arcLength(largest_contour, closed=True)
         epsilon = 0.002 * perimeter
         simplified = cv2.approxPolyDP(largest_contour, epsilon, closed=True)
-        # simplified shape: (N, 1, 2) → list of [x, y] with ROI offset applied
         points = [
             [int(pt[0][0]) + x_offset, int(pt[0][1]) + y_offset]
             for pt in simplified
         ]
     except Exception as exc:
         output_error(f"poly_simplify_error: {exc}")
+        sys.exit(0)
+
+    # --- Quality gate: reject if too few points ---
+    if len(points) < MIN_CONTOUR_POINTS:
+        print(json.dumps({"contours": [], "image_size": image_size}))
         sys.exit(0)
 
     # --- Build output ---
@@ -269,7 +293,7 @@ def main():
                 "area_px": round(best_area, 1),
             }
         ],
-        "image_size": {"width": full_w, "height": full_h},
+        "image_size": image_size,
     }
     print(json.dumps(output))
     sys.exit(0)
