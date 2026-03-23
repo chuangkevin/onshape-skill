@@ -157,4 +157,14 @@ const MIGRATIONS = [
       DELETE FROM projects WHERE name IN ('Test Project', 'Listed Project');
     `,
   },
+  {
+    name: '004_web_calibration_cache',
+    sql: `
+      CREATE TABLE IF NOT EXISTS web_calibration_cache (
+        model_id TEXT PRIMARY KEY,
+        contours_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+    `,
+  },
 ];

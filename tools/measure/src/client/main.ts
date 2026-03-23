@@ -415,6 +415,40 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
     updateProgress({ _statuses: statuses });
   });
 
+  es.addEventListener('contour-update', (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as {
+      source: 'fastsam' | 'web-calibrated' | 'opencv' | 'gemini' | 'none';
+      contours: { contour_px: { x: number; y: number }[] }[];
+    };
+
+    const applyContour = () => {
+      if (!data.contours || data.contours.length === 0) return;
+      const largest = data.contours[0];
+      if (!largest.contour_px || largest.contour_px.length < 3) return;
+      store.removeDrawing('auto_contour');
+      store.addDrawing({
+        type: 'polyline',
+        id: 'auto_contour',
+        points_px: largest.contour_px,
+        closed: true,
+      });
+      renderDrawings();
+    };
+
+    const activePhoto = store.getActivePhoto();
+    const hasUserContours = (activePhoto?.drawings ?? []).some(d => d.id === 'auto_contour');
+
+    if (data.source === 'web-calibrated' && hasUserContours) {
+      if (confirm('AI 已完成 Web 校正，是否以更準確的輪廓替換目前輪廓？')) {
+        applyContour();
+        updateContourSourceLabel(data.source);
+      }
+    } else {
+      applyContour();
+      updateContourSourceLabel(data.source);
+    }
+  });
+
   es.onerror = () => {
     es.close();
     // Show error, don't auto-advance
@@ -427,6 +461,20 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
       }
     }
   };
+}
+
+// ── Contour Source Label ──
+function updateContourSourceLabel(source: 'fastsam' | 'web-calibrated' | 'opencv' | 'gemini' | 'none' | string): void {
+  const label = document.getElementById('contourSourceLabel');
+  if (!label) return;
+  const labelMap: Record<string, string> = {
+    'fastsam': 'FastSAM 初步輪廓',
+    'web-calibrated': 'Web 校正輪廓 ✓',
+    'opencv': 'OpenCV 輪廓',
+    'gemini': 'Gemini 輪廓',
+    'none': '',
+  };
+  label.textContent = labelMap[source] ?? '';
 }
 
 // ── Landing Page Logic ──

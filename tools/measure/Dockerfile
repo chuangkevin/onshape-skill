@@ -8,10 +8,18 @@ RUN apt-get update && \
         libgl1 libglib2.0-0 && \
     pip3 install --no-cache-dir --break-system-packages \
         opencv-python-headless>=4.10.0 \
-        numpy>=1.26.0 && \
+        numpy>=1.26.0 \
+        ultralytics scipy beautifulsoup4 requests && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Pre-download FastSAM-s model (~23MB) so it's baked into the image
+RUN mkdir -p /app/models && \
+    python3 -c "from ultralytics import FastSAM; FastSAM('FastSAM-s.pt')" && \
+    find / -name "FastSAM-s.pt" 2>/dev/null -exec cp {} /app/models/FastSAM-s.pt \; || \
+    echo "FastSAM model will download on first use"
+
 ENV PYTHON_PATH=/usr/bin/python3
+ENV FASTSAM_MODEL_PATH=/app/models/FastSAM-s.pt
 
 WORKDIR /app
 

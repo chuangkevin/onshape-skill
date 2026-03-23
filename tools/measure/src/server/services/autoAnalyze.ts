@@ -1,11 +1,18 @@
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import type { Response } from 'express';
 import { getDb } from '../db.js';
 import { detectRuler, detectObjectBBox } from './ruler.js';
 import { detectEdges } from './opencv.js';
-import { detectContourWithGemini } from './contour.js';
+import { detectContourWithFastSAM, detectContourWithGemini } from './contour.js';
 import { extractLabels } from './search.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const WEB_CALIBRATE_SCRIPT = resolve(__dirname, '../python/web_calibrate.py');
+const IS_WINDOWS = process.platform === 'win32';
 
 type StepId = 'ruler' | 'bbox' | 'contour' | 'labels' | 'complete';
 type StepStatus = 'running' | 'done' | 'error';
@@ -20,6 +27,126 @@ function emitError(res: Response, message: string): void {
   if (res.writableEnded) return;
   res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
   res.end();
+}
+
+function emitContourUpdate(
+  res: Response,
+  source: string,
+  contours: unknown[],
+): void {
+  if (res.writableEnded) return;
+  res.write(`event: contour-update\ndata: ${JSON.stringify({ source, contours })}\n\n`);
+}
+
+/** Extract model ID patterns like L390X45S from label strings */
+function extractModelId(labelResult: any): string | null {
+  if (!labelResult) return null;
+  const text = JSON.stringify(labelResult);
+  const match = text.match(/L\d+[A-Z]\d+[A-Z]\d+/);
+  return match ? match[0] : null;
+}
+
+/**
+ * Asynchronously run web_calibrate.py for Phase 2 calibration.
+ * Results are emitted via SSE as they arrive. Caches per model_id with 24 h TTL.
+ */
+function triggerWebCalibration(
+  res: Response,
+  imagePath: string,
+  labelResult: any,
+  projectId: number,
+): void {
+  const modelId = extractModelId(labelResult);
+  if (!modelId) {
+    console.log('[webCalib] No model ID found in labels, skipping Phase 2');
+    return;
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GEMINI_API_KEYS?.split(',')[0] ?? '';
+
+  // Check cache first
+  const db = getDb();
+  const ttl = 86400; // 24 h in seconds
+  const cached: any = db
+    .prepare(
+      `SELECT contours_json, created_at FROM web_calibration_cache
+       WHERE model_id = ? AND (unixepoch() - created_at) < ?`,
+    )
+    .get(modelId, ttl);
+
+  if (cached) {
+    console.log(`[webCalib] Cache hit for ${modelId}, emitting cached contours`);
+    try {
+      const contours = JSON.parse(cached.contours_json);
+      emitContourUpdate(res, 'web-calibrated', contours);
+    } catch {
+      console.error('[webCalib] Failed to parse cached contours');
+    }
+    return;
+  }
+
+  if (!existsSync(WEB_CALIBRATE_SCRIPT)) {
+    console.warn('[webCalib] web_calibrate.py not found at', WEB_CALIBRATE_SCRIPT);
+    return;
+  }
+
+  const pythonCmd = process.env.PYTHON_PATH ?? (IS_WINDOWS ? 'python' : 'python3');
+  const args = [WEB_CALIBRATE_SCRIPT, '--model-id', modelId, '--gemini-key', geminiKey];
+  const safeArgs = IS_WINDOWS
+    ? args.map((a) => (a.includes(' ') || a.includes(';') ? `"${a}"` : a))
+    : args;
+
+  const proc = spawn(pythonCmd, safeArgs, {
+    shell: true,
+    windowsHide: true,
+    env: process.env,
+  });
+
+  let buffer = '';
+  let calibratedContours: unknown[] | null = null;
+
+  proc.stdout.on('data', (chunk: Buffer) => {
+    buffer += chunk.toString();
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const msg = JSON.parse(trimmed);
+        if (msg.event === 'contour-update' && Array.isArray(msg.contours)) {
+          calibratedContours = msg.contours;
+          emitContourUpdate(res, 'web-calibrated', msg.contours);
+          console.log(`[webCalib] Phase 2 contour-update for ${modelId}: ${msg.contours.length} contour(s)`);
+        }
+      } catch {
+        // ignore non-JSON lines (e.g. debug prints)
+      }
+    }
+  });
+
+  proc.stderr.on('data', (d: Buffer) => {
+    console.warn('[webCalib] stderr:', d.toString().trim());
+  });
+
+  proc.on('close', (code: number | null) => {
+    console.log(`[webCalib] web_calibrate.py exited with code ${code}`);
+    if (calibratedContours) {
+      try {
+        db.prepare(
+          `INSERT OR REPLACE INTO web_calibration_cache (model_id, contours_json, created_at)
+           VALUES (?, ?, unixepoch())`,
+        ).run(modelId, JSON.stringify(calibratedContours));
+        console.log(`[webCalib] Cached contours for ${modelId}`);
+      } catch (e: any) {
+        console.error('[webCalib] Failed to cache contours:', e.message);
+      }
+    }
+  });
+
+  proc.on('error', (e: Error) => {
+    console.error('[webCalib] Failed to spawn web_calibrate.py:', e.message);
+  });
 }
 
 export async function runAutoAnalysis(
@@ -60,23 +187,42 @@ export async function runAutoAnalysis(
     ]);
 
     // Phase 2: Three-layer fallback contour detection
-    // Layer 1: OpenCV + bbox ROI (pixel-precise) → Layer 2: Gemini polygon (rough) → Layer 3: none
+    // Layer 0: FastSAM (fast, local) → Layer 1: OpenCV + bbox ROI → Layer 2: Gemini polygon (rough)
     emit(res, 'contour', 'running');
 
     let contourResult: any = null;
 
-    // Layer 1: OpenCV edge detection with Gemini bbox as ROI
+    // Layer 0: FastSAM segmentation
     try {
-      const roi = bboxResult?.found
-        ? { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! }
+      const fastSamRoi = bboxResult?.found
+        ? { x1: bboxResult.x!, y1: bboxResult.y!, x2: bboxResult.x! + bboxResult.width!, y2: bboxResult.y! + bboxResult.height! }
         : undefined;
-      const opencvResult = await detectEdges(imagePath, roi, 0.003);
-      if (opencvResult?.contours?.length > 0) {
-        contourResult = { ...opencvResult, method: 'opencv' };
-        console.log(`[autoAnalyze] Contour via OpenCV (${opencvResult.contours.length} contour(s), ROI: ${!!roi})`);
+      const fastSamResult = await detectContourWithFastSAM(imagePath, fastSamRoi);
+      if (fastSamResult.found && fastSamResult.contours.length > 0) {
+        contourResult = { ...fastSamResult, method: 'fastsam' };
+        console.log(`[autoAnalyze] Contour via FastSAM (${fastSamResult.contours.length} contour(s))`);
+        emitContourUpdate(res, 'fastsam', fastSamResult.contours);
+        // Launch Phase 2 web calibration asynchronously (fire-and-forget)
+        triggerWebCalibration(res, imagePath, labelResult, projectId);
       }
     } catch (e: any) {
-      console.warn('[autoAnalyze] OpenCV failed, trying Gemini:', e.message);
+      console.warn('[autoAnalyze] FastSAM failed, trying OpenCV:', e.message);
+    }
+
+    // Layer 1: OpenCV edge detection with Gemini bbox as ROI
+    if (!contourResult) {
+      try {
+        const roi = bboxResult?.found
+          ? { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! }
+          : undefined;
+        const opencvResult = await detectEdges(imagePath, roi, 0.003);
+        if (opencvResult?.contours?.length > 0) {
+          contourResult = { ...opencvResult, method: 'opencv' };
+          console.log(`[autoAnalyze] Contour via OpenCV (${opencvResult.contours.length} contour(s), ROI: ${!!roi})`);
+        }
+      } catch (e: any) {
+        console.warn('[autoAnalyze] OpenCV failed, trying Gemini:', e.message);
+      }
     }
 
     // Layer 2: Gemini contour (fallback when OpenCV unavailable or returns nothing)
