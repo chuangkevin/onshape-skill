@@ -209,16 +209,15 @@ export async function runAutoAnalysis(
       console.warn('[autoAnalyze] FastSAM failed, trying OpenCV:', e.message);
     }
 
-    // Layer 1: OpenCV edge detection with Gemini bbox as ROI
-    if (!contourResult) {
+    // Layer 1: OpenCV edge detection — only run if we have a bbox ROI to constrain the search
+    // Without ROI, OpenCV scans the full image and produces unreliable full-frame contours
+    if (!contourResult && bboxResult?.found) {
       try {
-        const roi = bboxResult?.found
-          ? { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! }
-          : undefined;
+        const roi = { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! };
         const opencvResult = await detectEdges(imagePath, roi, 0.003);
         if (opencvResult?.contours?.length > 0) {
           contourResult = { ...opencvResult, method: 'opencv' };
-          console.log(`[autoAnalyze] Contour via OpenCV (${opencvResult.contours.length} contour(s), ROI: ${!!roi})`);
+          console.log(`[autoAnalyze] Contour via OpenCV (${opencvResult.contours.length} contour(s), ROI: ${roi.width}x${roi.height})`);
         }
       } catch (e: any) {
         console.warn('[autoAnalyze] OpenCV failed, trying Gemini:', e.message);

@@ -35,10 +35,14 @@ def resolve_model_path(model_arg: str) -> str | None:
     """Return a valid model path, or None if no model file is found."""
     if os.path.isfile(model_arg):
         return model_arg
-    # Fallback: look for FastSAM-s.pt in the current working directory
-    fallback = os.path.join(os.getcwd(), "FastSAM-s.pt")
-    if os.path.isfile(fallback):
-        return fallback
+    # Check next to this script file (works when spawned from any working directory)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    for candidate in [
+        os.path.join(script_dir, "FastSAM-s.pt"),
+        os.path.join(os.getcwd(), "FastSAM-s.pt"),
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
     return None
 
 
