@@ -181,11 +181,14 @@ def main():
     try:
         total_pixels = float(infer_h * infer_w)
 
-        # Collect all significant masks (0.5%–85% of image)
+        # ROI path: lower threshold to catch individual small parts (e.g. keyboard keys)
+        # Non-ROI path: higher threshold to avoid noise
+        min_ratio = 0.0005 if roi is not None else 0.005  # 0.05% vs 0.5%
+
         significant = []
         for i in range(len(mask_data)):
             area_ratio = float(mask_data[i].sum()) / total_pixels
-            if 0.005 <= area_ratio <= 0.85:
+            if min_ratio <= area_ratio <= 0.85:
                 conf = float(confs[i]) if confs is not None and i < len(confs) else 0.5
                 significant.append((i, area_ratio, conf))
 
@@ -196,26 +199,36 @@ def main():
         significant.sort(key=lambda x: x[1], reverse=True)
 
         if roi is not None:
-            # With ROI: use convex hull of all significant segments
-            # to get the complete object outline even when fragmented (e.g. keyboard keys)
-            all_pts = []
-            for i, ratio, _ in significant:
+            # With ROI: union all significant masks then morphological closing to fill
+            # inter-key gaps, then find outer contour. Works even for keyboards where
+            # FastSAM detects every key individually.
+            combined = np.zeros((infer_h, infer_w), dtype=np.uint8)
+            total_conf = 0.0
+            for i, ratio, conf in significant:
                 m = (mask_data[i] > 0.5).astype(np.uint8)
                 if m.shape[:2] != (infer_h, infer_w):
                     m = cv2.resize(m, (infer_w, infer_h), interpolation=cv2.INTER_NEAREST)
-                ctrs, _ = cv2.findContours(m * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                for c in ctrs:
-                    all_pts.append(c)
+                combined = cv2.bitwise_or(combined, m * 255)
+                total_conf += conf
 
-            if not all_pts:
+            # Close gaps between adjacent parts (e.g. gaps between keyboard keys)
+            close_px = max(5, int(min(infer_h, infer_w) * 0.015))  # ~1.5% of short side
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (close_px, close_px))
+            closed = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+
+            # Find the largest outer contour of the merged region
+            ctrs, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not ctrs:
                 print(json.dumps({"contours": [], "image_size": image_size}))
                 sys.exit(0)
 
-            all_pts_np = np.vstack(all_pts)
-            hull = cv2.convexHull(all_pts_np)
+            best_ctr = max(ctrs, key=cv2.contourArea)
+            peri = cv2.arcLength(best_ctr, closed=True)
+            eps = 0.005 * peri
+            simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
             hull_points = [
                 [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
-                for p in hull
+                for p in simplified
             ]
 
             # Quality gate: reject if too few points
@@ -223,12 +236,13 @@ def main():
                 print(json.dumps({"contours": [], "image_size": image_size}))
                 sys.exit(0)
 
+            avg_conf = total_conf / len(significant) if significant else 0.5
             output = {
                 "contours": [
                     {
                         "contour_px": hull_points,
-                        "confidence": float(np.mean([c for _, _, c in significant])),
-                        "area_px": float(cv2.contourArea(hull)),
+                        "confidence": round(avg_conf, 4),
+                        "area_px": float(cv2.contourArea(best_ctr)),
                     }
                 ],
                 "image_size": image_size,
