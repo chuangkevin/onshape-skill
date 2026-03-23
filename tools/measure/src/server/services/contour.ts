@@ -165,21 +165,28 @@ export async function detectContourWithFastSAM(
  * coordinates so Gemini focuses on the correct region of the full image.
  */
 function buildContourPrompt(roi?: ContourRoi): string {
-  const bboxHint = roi
-    ? `The main object is located at approximately x=${Math.round(roi.x)}, y=${Math.round(roi.y)}, ` +
-      `width=${Math.round(roi.width)}, height=${Math.round(roi.height)} pixels (from top-left corner). ` +
-      `Focus ONLY on this object.\n\n`
+  const bboxConstraint = roi
+    ? `OBJECT LOCATION: The object occupies approximately x=${Math.round(roi.x)} to x=${Math.round(roi.x + roi.width)}, y=${Math.round(roi.y)} to y=${Math.round(roi.y + roi.height)} pixels.\n` +
+      `HARD CONSTRAINT: Every contour point MUST have x between ${Math.round(roi.x)} and ${Math.round(roi.x + roi.width)}, and y between ${Math.round(roi.y)} and ${Math.round(roi.y + roi.height)}.\n` +
+      `Do NOT trace any objects outside this region.\n\n`
     : '';
 
-  return `${bboxHint}\
+  return `${bboxConstraint}\
 Analyze this photo. Find the MAIN physical object (not the ruler, not the table, not hands).
 
-Trace its EXACT outline as 20-60 coordinate points along the ACTUAL visible edge — NOT a bounding box.
-Include notches, connectors, cutouts, curves, indentations.
-Clockwise from top-left. Full-image pixel coordinates (0,0 = top-left, x→right, y→down).
+Your task: trace the COMPLETE PHYSICAL OUTER BOUNDARY of that ONE object — the silhouette its shadow would make if lit from directly above.
+
+CRITICAL RULES:
+- Include the ENTIRE object body: its plastic/metal chassis, frame, ALL sections (e.g. for a keyboard: main key area AND right navigation cluster AND bottom connector — the full unit)
+- Trace the PHYSICAL OUTER EDGE of the device chassis, NOT just the key/button area
+- Do NOT include separate nearby objects (panels, other devices, etc.)
+- Exclude ruler, table surface, hands, cables
+
+Trace 40-80 coordinate points clockwise from the top-left corner.
+Full-image pixel coordinates (0,0 = top-left, x→right, y→down).
 
 Reply ONLY with JSON, no markdown:
-{"found":true,"contours":[{"label":"name","contour_px":[{"x":10,"y":20},...]}]}
+{"found":true,"contours":[{"label":"<object name>","contour_px":[{"x":10,"y":20},...]}]}
 If no object: {"found":false,"contours":[]}`;
 }
 
@@ -234,6 +241,19 @@ export async function detectContourWithGemini(
         x: pt.x as number,
         y: pt.y as number,
       }));
+      // Clip all points to bbox bounds — prevents Gemini from wandering outside the object region
+      if (roi) {
+        const xMin = roi.x;
+        const xMax = roi.x + roi.width;
+        const yMin = roi.y;
+        const yMax = roi.y + roi.height;
+        points = points.map((pt) => ({
+          x: Math.max(xMin, Math.min(xMax, pt.x)),
+          y: Math.max(yMin, Math.min(yMax, pt.y)),
+        }));
+        // Remove consecutive duplicates created by clipping
+        points = points.filter((pt, i) => i === 0 || pt.x !== points[i - 1].x || pt.y !== points[i - 1].y);
+      }
       if (points.length > MAX_POINTS) {
         const step = points.length / MAX_POINTS;
         points = Array.from({ length: MAX_POINTS }, (_, i) => points[Math.floor(i * step)]);

@@ -102,16 +102,22 @@ function pixelDistance(a: RulerPoint, b: RulerPoint): number {
 // ---------------------------------------------------------------------------
 
 const BBOX_PROMPT = `\
-You are analyzing a photo of a physical object (electronic component, battery, keyboard, etc.) placed on a surface, possibly with a ruler nearby.
+You are analyzing a photo of a physical object placed on a surface, possibly with a ruler nearby.
 
-Your task: Find the MAIN OBJECT (not the ruler, not the background) and return its bounding box in pixel coordinates.
+Your task: Return the bounding box of the SINGLE PRIMARY OBJECT that is the clear subject of the photo.
 
-The image origin (0,0) is at the top-left corner. x increases right, y increases down.
+Rules:
+- Pick exactly ONE object — the most prominent one (e.g. the keyboard, the battery, the part being measured)
+- Exclude: ruler/measuring tape, table/surface, hands, background objects, accessories placed nearby
+- If multiple separate objects exist, pick only the ONE that is most clearly the subject (usually the largest, most centered dark object)
+- The bbox must tightly enclose ONLY that one object — do not include nearby objects even if they look related
+
+The image origin (0,0) is at the top-left. x increases right, y increases down.
 
 Respond ONLY with JSON:
-{"found":true,"x":100,"y":50,"width":800,"height":400,"description":"laptop battery"}
+{"found":true,"x":100,"y":50,"width":800,"height":400,"description":"ThinkPad keyboard"}
 
-If no clear object is found:
+If no clear single object is found:
 {"found":false}`;
 
 export interface BBoxResult {

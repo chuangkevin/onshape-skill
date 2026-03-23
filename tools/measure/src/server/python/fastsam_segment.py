@@ -199,44 +199,82 @@ def main():
         significant.sort(key=lambda x: x[1], reverse=True)
 
         if roi is not None:
-            # With ROI: union all significant masks then morphological closing to fill
-            # inter-key gaps, then find outer contour. Works even for keyboards where
-            # FastSAM detects every key individually.
-            combined = np.zeros((infer_h, infer_w), dtype=np.uint8)
-            total_conf = 0.0
-            for i, ratio, conf in significant:
-                m = (mask_data[i] > 0.5).astype(np.uint8)
-                if m.shape[:2] != (infer_h, infer_w):
-                    m = cv2.resize(m, (infer_w, infer_h), interpolation=cv2.INTER_NEAREST)
-                combined = cv2.bitwise_or(combined, m * 255)
-                total_conf += conf
+            # --- ROI path: fixed threshold + morphological closing ---
+            # Threshold at 90: separates dark objects (keyboard, battery) from
+            # light backgrounds (wood table, paper). 20px closing bridges
+            # inter-key gaps while preserving concave features like bottom
+            # connector brackets or side notches.
 
-            # Close gaps between adjacent parts (e.g. gaps between keyboard keys)
-            close_px = max(5, int(min(infer_h, infer_w) * 0.015))  # ~1.5% of short side
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (close_px, close_px))
-            closed = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+            gray_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
 
-            # Find the largest outer contour of the merged region
-            ctrs, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not ctrs:
-                print(json.dumps({"contours": [], "image_size": image_size}))
-                sys.exit(0)
+            _, thresh = cv2.threshold(gray_image, 90, 255, cv2.THRESH_BINARY_INV)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 20))
+            closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
-            best_ctr = max(ctrs, key=cv2.contourArea)
+            ctrs_thresh, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            thresh_best = None
+            if ctrs_thresh:
+                largest_thresh = max(ctrs_thresh, key=cv2.contourArea)
+                thresh_ratio = cv2.contourArea(largest_thresh) / float(infer_h * infer_w)
+                if 0.20 <= thresh_ratio <= 0.90:
+                    thresh_best = largest_thresh
+
+            if thresh_best is not None:
+                best_ctr = thresh_best
+                avg_conf = 0.75
+            else:
+                # --- Fallback: FastSAM mask union (for objects not clearly darker than bg) ---
+                DARK_THRESHOLD = 130
+                combined = np.zeros((infer_h, infer_w), dtype=np.uint8)
+                total_conf = 0.0
+                included = 0
+                for i, ratio, conf in significant:
+                    m = (mask_data[i] > 0.5).astype(np.uint8)
+                    if m.shape[:2] != (infer_h, infer_w):
+                        m = cv2.resize(m, (infer_w, infer_h), interpolation=cv2.INTER_NEAREST)
+                    mean_val = cv2.mean(gray_image, mask=m * 255)[0]
+                    if mean_val < DARK_THRESHOLD:
+                        combined = cv2.bitwise_or(combined, m * 255)
+                        total_conf += conf
+                        included += 1
+
+                coverage = np.count_nonzero(combined) / float(infer_h * infer_w)
+                if included == 0 or coverage < 0.15:
+                    combined = np.zeros((infer_h, infer_w), dtype=np.uint8)
+                    total_conf = 0.0
+                    for i, ratio, conf in significant:
+                        m = (mask_data[i] > 0.5).astype(np.uint8)
+                        if m.shape[:2] != (infer_h, infer_w):
+                            m = cv2.resize(m, (infer_w, infer_h), interpolation=cv2.INTER_NEAREST)
+                        combined = cv2.bitwise_or(combined, m * 255)
+                        total_conf += conf
+
+                kernel_fb = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 20))
+                closed_fb = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel_fb)
+                ctrs_fb, _ = cv2.findContours(closed_fb, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if not ctrs_fb:
+                    print(json.dumps({"contours": [], "image_size": image_size}))
+                    sys.exit(0)
+                if len(ctrs_fb) > 1:
+                    all_pts = np.concatenate(ctrs_fb, axis=0)
+                    best_ctr = cv2.convexHull(all_pts)
+                else:
+                    best_ctr = ctrs_fb[0]
+                avg_conf = total_conf / len(significant) if significant else 0.5
+
+            # best_ctr is already set above (threshold or FastSAM fallback path)
             peri = cv2.arcLength(best_ctr, closed=True)
-            eps = 0.005 * peri
+            eps = 0.003 * peri  # 0.3%: preserves concave features like bottom brackets
             simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
             hull_points = [
                 [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
                 for p in simplified
             ]
 
-            # Quality gate: reject if too few points
-            if len(hull_points) < MIN_CONTOUR_POINTS:
+            # Quality gate: 4+ points required
+            if len(hull_points) < 4:
                 print(json.dumps({"contours": [], "image_size": image_size}))
                 sys.exit(0)
-
-            avg_conf = total_conf / len(significant) if significant else 0.5
             output = {
                 "contours": [
                     {

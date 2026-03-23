@@ -40,34 +40,48 @@ function emitContourUpdate(
 /**
  * Quality gate for contour results.
  * Returns false (reject) if:
- *   - Fewer than 6 points in the first contour
- *   - Contour bounding rect covers >85% of the FULL IMAGE area
- *     (a real object contour should not engulf the whole image)
+ *   - Fewer than 4 points
+ *   - Contour bounding rect covers >85% of the FULL IMAGE (background/noise)
+ *   - Contour covers <50% of the Gemini bbox area (incomplete — FastSAM missed part of object)
  */
 function isContourQualityOk(
   contours: Array<{ contour_px: Array<{ x: number; y: number }> }>,
-  _bboxResult: unknown,
+  bboxResult: { found?: boolean; x?: number; y?: number; width?: number; height?: number } | null | unknown,
   imageWidth: number,
   imageHeight: number,
 ): boolean {
   if (!contours || contours.length === 0) return false;
   const pts = contours[0].contour_px;
-  if (!pts || pts.length < 6) {
-    console.log(`[quality] Rejected: only ${pts?.length ?? 0} points (min 6)`);
+  if (!pts || pts.length < 4) {
+    console.log(`[quality] Rejected: only ${pts?.length ?? 0} points (min 4)`);
     return false;
   }
 
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const cW = Math.max(...xs) - Math.min(...xs);
+  const cH = Math.max(...ys) - Math.min(...ys);
+
   if (imageWidth > 0 && imageHeight > 0) {
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const contourArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
-    const imageArea = imageWidth * imageHeight;
-    const ratio = contourArea / imageArea;
+    const ratio = (cW * cH) / (imageWidth * imageHeight);
     if (ratio > 0.85) {
       console.log(`[quality] Rejected: contour covers ${(ratio * 100).toFixed(0)}% of image (max 85%)`);
       return false;
     }
   }
+
+  // If Gemini bbox is available, contour must cover ≥50% of the bbox area.
+  // A smaller ratio means FastSAM only found part of the object — force Gemini fallback.
+  const bbox = bboxResult as { found?: boolean; x?: number; y?: number; width?: number; height?: number } | null;
+  if (bbox?.found && bbox.width && bbox.height && bbox.width > 0 && bbox.height > 0) {
+    const bboxArea = bbox.width * bbox.height;
+    const coverageRatio = (cW * cH) / bboxArea;
+    if (coverageRatio < 0.50) {
+      console.log(`[quality] Rejected: contour bbox covers only ${(coverageRatio * 100).toFixed(0)}% of detected object bbox (min 50%)`);
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -234,8 +248,19 @@ export async function runAutoAnalysis(
 
     // Layer 0: FastSAM segmentation
     try {
+      // Add 10% padding around the bbox so features like bottom connector brackets
+      // (which protrude beyond the main key area) are included in the crop.
       const fastSamRoi = bboxResult?.found
-        ? { x1: bboxResult.x!, y1: bboxResult.y!, x2: bboxResult.x! + bboxResult.width!, y2: bboxResult.y! + bboxResult.height! }
+        ? (() => {
+            const padX = Math.round(bboxResult.width! * 0.10);
+            const padY = Math.round(bboxResult.height! * 0.10);
+            return {
+              x1: Math.max(0, bboxResult.x! - padX),
+              y1: Math.max(0, bboxResult.y! - padY),
+              x2: bboxResult.x! + bboxResult.width! + padX,
+              y2: bboxResult.y! + bboxResult.height! + padY,
+            };
+          })()
         : undefined;
       const fastSamResult = await detectContourWithFastSAM(imagePath, fastSamRoi);
 
