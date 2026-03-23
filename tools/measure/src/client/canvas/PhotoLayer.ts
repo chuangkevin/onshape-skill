@@ -53,7 +53,7 @@ export class PhotoLayer {
     });
 
     eventTarget.addEventListener('pointerdown', (e) => {
-      if (this.spaceDown || e.button === 1) {
+      if (this.spaceDown || e.button === 1 || (e.ctrlKey && e.button === 0)) {
         this.isPanning = true;
         this.panStartX = e.clientX - this._offsetX;
         this.panStartY = e.clientY - this._offsetY;

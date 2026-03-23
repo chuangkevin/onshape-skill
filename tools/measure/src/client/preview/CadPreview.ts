@@ -206,7 +206,13 @@ export function createCadPreview(options: CadPreviewOptions): { dispose: () => v
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV, aspect, CAMERA_NEAR, CAMERA_FAR);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.12;
+  controls.dampingFactor = 0.05;
+  controls.enablePan = true;
+  controls.mouseButtons = {
+    LEFT: THREE.MOUSE.ROTATE,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.PAN,
+  };
 
   // ── Model ──
   const shape = buildShape(contour_mm, features);

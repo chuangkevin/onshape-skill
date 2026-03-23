@@ -96,7 +96,7 @@ export async function detectContourWithGemini(
     return { label: c.label as string | undefined, contour_px: points };
   });
 
-  console.log(`[contour-gemini] Detected ${processedContours.length} contour(s), points: ${processedContours.map(c => c.contour_px.length).join(',')}`);
+  console.log(`[contour-gemini] Detected ${processedContours.length} contour(s), points: ${processedContours.map((c: { contour_px: number[][] }) => c.contour_px.length).join(',')}`);
 
   return {
     found: true,

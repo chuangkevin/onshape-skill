@@ -15,6 +15,7 @@ export function activateArcTool(
   points = [];
 
   const onClick = (e: MouseEvent) => {
+    if (e.ctrlKey) return;
     if (e.button !== 0) return;
     if (photoLayer.isPanningNow) return;
     const rect = drawingCanvas.getBoundingClientRect();

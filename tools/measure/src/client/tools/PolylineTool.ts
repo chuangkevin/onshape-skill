@@ -20,6 +20,7 @@ export function activatePolylineTool(
   lastClickTime = 0;
 
   const onClick = (e: MouseEvent) => {
+    if (e.ctrlKey) return;
     if (e.button !== 0) return;
     if (photoLayer.isPanningNow) return;
 

@@ -124,6 +124,7 @@ export function activateEditContourTool(
   };
 
   const onPointerDown = (e: PointerEvent) => {
+    if (e.ctrlKey) return;
     if (e.button !== 0 || photoLayer.isPanningNow) return;
 
     if (highlight.hoveredVertexIndex >= 0) {
