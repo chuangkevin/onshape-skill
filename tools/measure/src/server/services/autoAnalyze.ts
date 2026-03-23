@@ -5,7 +5,6 @@ import { existsSync } from 'fs';
 import type { Response } from 'express';
 import { getDb } from '../db.js';
 import { detectRuler, detectObjectBBox } from './ruler.js';
-import { detectEdges } from './opencv.js';
 import { detectContourWithFastSAM, detectContourWithGemini } from './contour.js';
 import { extractLabels } from './search.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
@@ -209,28 +208,14 @@ export async function runAutoAnalysis(
       console.warn('[autoAnalyze] FastSAM failed, trying OpenCV:', e.message);
     }
 
-    // Layer 1: OpenCV edge detection — only run if we have a bbox ROI to constrain the search
-    // Without ROI, OpenCV scans the full image and produces unreliable full-frame contours
-    if (!contourResult && bboxResult?.found) {
-      try {
-        const roi = { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! };
-        const opencvResult = await detectEdges(imagePath, roi, 0.003);
-        if (opencvResult?.contours?.length > 0) {
-          contourResult = { ...opencvResult, method: 'opencv' };
-          console.log(`[autoAnalyze] Contour via OpenCV (${opencvResult.contours.length} contour(s), ROI: ${roi.width}x${roi.height})`);
-        }
-      } catch (e: any) {
-        console.warn('[autoAnalyze] OpenCV failed, trying Gemini:', e.message);
-      }
-    }
-
-    // Layer 2: Gemini contour (fallback when OpenCV unavailable or returns nothing)
+    // Layer 1: Gemini contour (semantic fallback — understands what the main object is)
     if (!contourResult) {
       try {
         const geminiContour = await detectContourWithGemini(imagePath, projectId);
         if (geminiContour.found && geminiContour.contours.length > 0) {
           contourResult = { ...geminiContour, method: 'gemini' };
           console.log(`[autoAnalyze] Contour via Gemini (${geminiContour.contours.length} contour(s))`);
+          emitContourUpdate(res, 'gemini', geminiContour.contours);
         }
       } catch (e: any) {
         console.warn('[autoAnalyze] Gemini contour also failed:', e.message);
