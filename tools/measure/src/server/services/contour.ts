@@ -1,12 +1,14 @@
 import { spawn } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
 import { callGemini } from '../geminiClient.js';
 import { parseJsonFromText } from './ruler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FASTSAM_SCRIPT_PATH = resolve(__dirname, '../python/fastsam_segment.py');
+const CROP_SCRIPT_PATH = resolve(__dirname, '../python/crop_image.py');
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -146,42 +148,127 @@ export async function detectContourWithFastSAM(
 }
 
 // ---------------------------------------------------------------------------
-// Prompt
+// Prompts
 // ---------------------------------------------------------------------------
 
-const CONTOUR_PROMPT = `\
-Analyze this photo. Find the MAIN physical object (ignore rulers, fingers, table, background).
+/** Used when we pass only the cropped object image — Gemini sees just the object */
+const CONTOUR_PROMPT_CROPPED = `\
+This image shows a single physical object cropped from a larger photo.
 
-Trace its outline as 20-80 coordinate points along the ACTUAL visible edge — not a bounding box.
-Follow the real shape: notches, tabs, connectors, curves, indentations.
-Place more points at corners/curves, fewer on straight edges.
-Clockwise from top-left. Pixel coordinates (origin top-left, x→right, y→down).
+Trace its EXACT outline — follow the actual physical edges, NOT a bounding box.
+Include ALL irregular features: notches, cutouts, connectors, curves, tabs, indentations.
+Provide 20-60 points. More points on curves and corners, fewer on straight edges.
+Clockwise from top-left. Pixel coordinates relative to THIS image (0,0 = top-left, x→right, y→down).
 
-Reply with ONLY JSON, no markdown:
-{"found":true,"contours":[{"label":"name","contour_px":[{"x":10,"y":20},{"x":50,"y":20},{"x":55,"y":25},{"x":55,"y":80},{"x":10,"y":80}]}]}
+Reply ONLY with JSON, no markdown:
+{"found":true,"contours":[{"label":"object name","contour_px":[{"x":10,"y":20},...]}]}
+If unclear: {"found":false,"contours":[]}`;
 
+/** Fallback when no crop ROI — full image context */
+const CONTOUR_PROMPT_FULL = `\
+Analyze this photo. Find the MAIN physical object (not the ruler, not the table, not hands).
+
+Trace its EXACT outline as 20-60 coordinate points along the ACTUAL visible edge — NOT a bounding box.
+Include notches, connectors, cutouts, curves, indentations.
+Clockwise from top-left. Full-image pixel coordinates (0,0 = top-left, x→right, y→down).
+
+Reply ONLY with JSON, no markdown:
+{"found":true,"contours":[{"label":"name","contour_px":[{"x":10,"y":20},...]}]}
 If no object: {"found":false,"contours":[]}`;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Crop image using OpenCV via Python, return temp file path or null on failure */
+async function cropImageWithPython(
+  pythonCmd: string,
+  imagePath: string,
+  roi: { x: number; y: number; width: number; height: number },
+): Promise<string | null> {
+  if (!existsSync(CROP_SCRIPT_PATH)) {
+    console.warn('[contour-gemini] crop_image.py not found, skipping crop');
+    return null;
+  }
+  const ext = imagePath.match(/\.[^.]+$/)?.[0] ?? '.jpg';
+  const tmpPath = resolve(tmpdir(), `measure_crop_${Date.now()}${ext}`);
+  const args = [
+    CROP_SCRIPT_PATH,
+    imagePath,
+    String(Math.floor(roi.x)),
+    String(Math.floor(roi.y)),
+    String(Math.ceil(roi.width)),
+    String(Math.ceil(roi.height)),
+    tmpPath,
+  ];
+  const result = await spawnJson(pythonCmd, args);
+  try {
+    const parsed = JSON.parse(result.stdout.trim());
+    if (parsed.ok && existsSync(tmpPath)) {
+      console.log(`[contour-gemini] Cropped image to ${roi.width}x${roi.height} at (${roi.x},${roi.y})`);
+      return tmpPath;
+    }
+  } catch { /* ignore */ }
+  console.warn('[contour-gemini] crop failed:', result.stderr || result.stdout);
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
+export interface ContourRoi {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
- * Send an image to Gemini and ask it to detect the contour (outline) of the
- * main physical object(s) in the scene.  Returns an array of contours, each
- * consisting of pixel-coordinate points that trace the object edge.
+ * Send an image to Gemini and ask it to detect the contour of the main object.
+ * When `roi` is provided, the image is first cropped to that region so Gemini
+ * sees only the object — greatly improving accuracy in cluttered scenes.
+ * Returned contour coordinates are always in full-image pixel space.
  */
 export async function detectContourWithGemini(
   imagePath: string,
   projectId?: number,
+  roi?: ContourRoi,
 ): Promise<GeminiContourResult> {
+  const pythonCmd = await resolvePythonCommand();
+
+  // Try to crop the image to the ROI so Gemini only sees the target object
+  let imageToSend = imagePath;
+  let cropPath: string | null = null;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  if (roi) {
+    cropPath = await cropImageWithPython(pythonCmd, imagePath, roi);
+    if (cropPath) {
+      imageToSend = cropPath;
+      offsetX = Math.floor(roi.x);
+      offsetY = Math.floor(roi.y);
+    }
+  }
+
+  const prompt = cropPath ? CONTOUR_PROMPT_CROPPED : CONTOUR_PROMPT_FULL;
+
   // --- Call Gemini ----------------------------------------------------------
-  const { text } = await callGemini({
-    prompt: CONTOUR_PROMPT,
-    imagePaths: [imagePath],
-    callType: 'contour-detection',
-    projectId,
-  });
+  let text: string;
+  try {
+    ({ text } = await callGemini({
+      prompt,
+      imagePaths: [imageToSend],
+      callType: 'contour-detection',
+      projectId,
+    }));
+  } finally {
+    // Always clean up temp crop file
+    if (cropPath) {
+      try { unlinkSync(cropPath); } catch { /* ignore */ }
+    }
+  }
 
   // --- Parse response -------------------------------------------------------
   let parsed: any;
@@ -192,7 +279,6 @@ export async function detectContourWithGemini(
     return { found: false, contours: [], method: 'gemini' };
   }
 
-  // --- Validate -------------------------------------------------------------
   if (!parsed || parsed.found !== true) {
     return { found: false, contours: [], method: 'gemini' };
   }
@@ -202,36 +288,36 @@ export async function detectContourWithGemini(
     return { found: false, contours: [], method: 'gemini' };
   }
 
-  // Validate each contour has at least 3 points with numeric coordinates
-  const validContours = parsed.contours.filter((c: any) => {
-    if (!Array.isArray(c.contour_px) || c.contour_px.length < 3) return false;
-    return c.contour_px.every(
-      (pt: any) => typeof pt.x === 'number' && typeof pt.y === 'number',
-    );
-  });
+  // Validate and offset coordinates back to full-image space
+  const validContours = parsed.contours
+    .filter((c: any) =>
+      Array.isArray(c.contour_px) &&
+      c.contour_px.length >= 3 &&
+      c.contour_px.every((pt: any) => typeof pt.x === 'number' && typeof pt.y === 'number'),
+    )
+    .map((c: any) => {
+      const MAX_POINTS = 200;
+      let points: Array<{ x: number; y: number }> = c.contour_px.map((pt: any) => ({
+        x: pt.x + offsetX,
+        y: pt.y + offsetY,
+      }));
+      if (points.length > MAX_POINTS) {
+        const step = points.length / MAX_POINTS;
+        points = Array.from({ length: MAX_POINTS }, (_, i) => points[Math.floor(i * step)]);
+      }
+      return { label: c.label as string | undefined, contour_px: points };
+    });
 
   if (validContours.length === 0) {
-    console.error('[contour-gemini] No contours with >= 3 valid points:', parsed);
+    console.error('[contour-gemini] No valid contours after validation');
     return { found: false, contours: [], method: 'gemini' };
   }
 
-  // Subsample if too many points (Gemini sometimes generates hundreds)
-  const MAX_POINTS = 200;
-  const processedContours = validContours.map((c: any) => {
-    let points: Array<{ x: number; y: number }> = c.contour_px.map((pt: any) => ({ x: pt.x, y: pt.y }));
-    if (points.length > MAX_POINTS) {
-      const step = points.length / MAX_POINTS;
-      points = Array.from({ length: MAX_POINTS }, (_, i) => points[Math.floor(i * step)]);
-      console.log(`[contour-gemini] Subsampled ${c.contour_px.length} → ${MAX_POINTS} points`);
-    }
-    return { label: c.label as string | undefined, contour_px: points };
-  });
+  console.log(
+    `[contour-gemini] ${cropPath ? 'cropped-image' : 'full-image'} contour: ` +
+    `${validContours.length} contour(s), offset=(${offsetX},${offsetY}), ` +
+    `points: ${validContours.map((c: { contour_px: unknown[] }) => c.contour_px.length).join(',')}`,
+  );
 
-  console.log(`[contour-gemini] Detected ${processedContours.length} contour(s), points: ${processedContours.map((c: { contour_px: number[][] }) => c.contour_px.length).join(',')}`);
-
-  return {
-    found: true,
-    contours: processedContours,
-    method: 'gemini',
-  };
+  return { found: true, contours: validContours, method: 'gemini' };
 }

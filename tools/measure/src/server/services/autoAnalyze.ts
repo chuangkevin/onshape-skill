@@ -205,13 +205,16 @@ export async function runAutoAnalysis(
         triggerWebCalibration(res, imagePath, labelResult, projectId);
       }
     } catch (e: any) {
-      console.warn('[autoAnalyze] FastSAM failed, trying OpenCV:', e.message);
+      console.warn('[autoAnalyze] FastSAM failed, trying Gemini:', e.message);
     }
 
-    // Layer 1: Gemini contour (semantic fallback — understands what the main object is)
+    // Layer 1: Gemini contour (semantic fallback — crop to bbox ROI first for accuracy)
     if (!contourResult) {
       try {
-        const geminiContour = await detectContourWithGemini(imagePath, projectId);
+        const geminiRoi = bboxResult?.found
+          ? { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! }
+          : undefined;
+        const geminiContour = await detectContourWithGemini(imagePath, projectId, geminiRoi);
         if (geminiContour.found && geminiContour.contours.length > 0) {
           contourResult = { ...geminiContour, method: 'gemini' };
           console.log(`[autoAnalyze] Contour via Gemini (${geminiContour.contours.length} contour(s))`);
