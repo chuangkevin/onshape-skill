@@ -334,11 +334,31 @@ async function tryAutoContour(): Promise<void> {
 
 // ── Auto-Analysis (SSE) ──
 let autoAnalysisResults: any = null;
+let _activeEventSource: EventSource | null = null;
+
+function clearProjectState(): void {
+  // Close any in-flight SSE stream
+  if (_activeEventSource) {
+    _activeEventSource.close();
+    _activeEventSource = null;
+  }
+  // Reset module-level analysis state
+  autoAnalysisResults = null;
+  lastAnalysisRaw = null;
+  confirmedItems = [];
+  _lastScaleJson = '';
+  // Clear UI panels
+  analysisResults.innerHTML = '';
+  aiResultsPanel.innerHTML = '';
+  nextSteps.style.display = 'none';
+  updateContourSourceLabel('none');
+}
 
 function startAutoAnalysis(projectId: number, photoId: number): void {
   autoAnalysisResults = null;
 
   const es = new EventSource(`/api/projects/${projectId}/photos/${photoId}/auto-analyze`);
+  _activeEventSource = es;
 
   // Update wizard body with progress
   const updateProgress = (data: any) => {
@@ -402,6 +422,7 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
 
     if (data.step === 'complete' && data.status === 'done') {
       es.close();
+      _activeEventSource = null;
       autoAnalysisResults = { ...autoAnalysisResults, ...data.result };
 
       // Auto-advance wizard to step 2
@@ -451,6 +472,7 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
 
   es.onerror = () => {
     es.close();
+    _activeEventSource = null;
     // Show error, don't auto-advance
     if (currentMode === 'wizard' && wizardStep === 1) {
       const body = document.getElementById('wizardBody');
@@ -506,6 +528,8 @@ async function showLanding(pushHistory = true): Promise<void> {
 }
 
 async function openProject(projectId: number, pushHistory = true): Promise<void> {
+  clearProjectState();
+
   const projects = await api.listProjects();
   const project = projects.find(p => p.id === projectId);
   if (!project) return;
