@@ -111,9 +111,11 @@ export async function detectContourWithFastSAM(
 
   const result = await spawnJson(pythonCmd, args);
 
+  // ultralytics may print debug lines before the JSON — find the last JSON line
+  const lastJsonLine = result.stdout.trim().split(/\r?\n/).reverse().find((l) => l.startsWith('{'));
   let parsed: any;
   try {
-    parsed = JSON.parse(result.stdout.trim());
+    parsed = JSON.parse(lastJsonLine ?? '');
   } catch {
     console.error('[contour-fastsam] Failed to parse output:', result.stdout, result.stderr);
     return { found: false, contours: [], method: 'fastsam_unavailable' };

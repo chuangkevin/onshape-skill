@@ -157,6 +157,7 @@ def main():
             imgsz=1024,
             conf=0.4,
             iou=0.9,
+            verbose=False,
         )
     except Exception as exc:
         output_error(f"inference_error: {exc}")

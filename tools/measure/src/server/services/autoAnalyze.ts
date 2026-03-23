@@ -41,12 +41,12 @@ function emitContourUpdate(
  * Quality gate for contour results.
  * Returns false (reject) if:
  *   - Fewer than 6 points in the first contour
- *   - Contour bounding rect covers >85% of the reference area
- *     (bbox area when available, else full image area)
+ *   - Contour bounding rect covers >85% of the FULL IMAGE area
+ *     (a real object contour should not engulf the whole image)
  */
 function isContourQualityOk(
   contours: Array<{ contour_px: Array<{ x: number; y: number }> }>,
-  bboxResult: { found: boolean; x?: number; y?: number; width?: number; height?: number } | null,
+  _bboxResult: unknown,
   imageWidth: number,
   imageHeight: number,
 ): boolean {
@@ -57,20 +57,16 @@ function isContourQualityOk(
     return false;
   }
 
-  // Compute bounding rect of contour
-  const xs = pts.map((p) => p.x);
-  const ys = pts.map((p) => p.y);
-  const contourArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
-
-  // Reference area: bbox if found, else full image
-  const refArea = bboxResult?.found && bboxResult.width && bboxResult.height
-    ? bboxResult.width * bboxResult.height
-    : imageWidth * imageHeight;
-
-  const ratio = refArea > 0 ? contourArea / refArea : 1;
-  if (ratio > 0.85) {
-    console.log(`[quality] Rejected: contour area ratio ${ratio.toFixed(2)} > 0.85 (likely full-image garbage)`);
-    return false;
+  if (imageWidth > 0 && imageHeight > 0) {
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const contourArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    const imageArea = imageWidth * imageHeight;
+    const ratio = contourArea / imageArea;
+    if (ratio > 0.85) {
+      console.log(`[quality] Rejected: contour covers ${(ratio * 100).toFixed(0)}% of image (max 85%)`);
+      return false;
+    }
   }
   return true;
 }
