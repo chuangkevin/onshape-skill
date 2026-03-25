@@ -50,12 +50,24 @@ function loadKeys(db?: Database.Database): string[] {
   return cachedKeys;
 }
 
-/** Get the next API key via round-robin rotation */
-export function getGeminiApiKey(db?: Database.Database): string {
+/** Get the next API key via round-robin rotation.
+ *  Optional skipKeys set to avoid keys known to be bad. */
+export function getGeminiApiKey(db?: Database.Database, skipKeys?: Set<string>): string {
   const keys = loadKeys(db);
   if (keys.length === 0) {
     throw new Error('No Gemini API keys configured');
   }
+
+  // Try all keys starting from current index
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[(keyIndex + i) % keys.length];
+    if (!skipKeys || !skipKeys.has(key)) {
+      keyIndex = (keyIndex + i + 1) % keys.length;
+      return key;
+    }
+  }
+
+  // All keys are in skipKeys, return next anyway
   const key = keys[keyIndex % keys.length];
   keyIndex++;
   return key;

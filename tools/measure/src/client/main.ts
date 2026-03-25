@@ -1065,14 +1065,17 @@ function setupEvents(): void {
 
   previewCadBtn.addEventListener('click', async () => {
     const photo = store.getActivePhoto();
-    if (!photo?.drawings?.length) return;
+    if (!photo?.drawings?.length) { alert('無繪圖資料'); return; }
 
     // Get contour in mm
     const contour = photo.drawings.find(d => d.type === 'polyline' && d.closed && !d.id.startsWith('roi_'));
-    if (!contour) return;
+    if (!contour) { alert(`找不到輪廓。drawings: ${photo.drawings.map(d => d.id).join(', ')}`); return; }
 
     const scale = photo.scale?.px_per_mm || 1;
-    const contour_mm = (contour.points_px || []).map((p: any) => ({
+    const pts = (contour as any).points_px as {x:number;y:number}[] || [];
+    if (pts.length < 3) { alert(`輪廓點數不足: ${pts.length}`); return; }
+
+    const contour_mm = pts.map((p) => ({
       x: p.x / scale,
       y: p.y / scale,
     }));

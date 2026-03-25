@@ -25,25 +25,62 @@ interface GeminiRequestOptions {
   useGrounding?: boolean;
 }
 
-/** Call Gemini API with automatic key rotation and retry */
+// Track bad keys with cooldown (key → timestamp when it failed)
+const badKeys = new Map<string, number>();
+const BAD_KEY_COOLDOWN_MS = 5 * 60_000; // 5 min cooldown for failed keys
+
+function isKeyUsable(key: string): boolean {
+  const failedAt = badKeys.get(key);
+  if (!failedAt) return true;
+  if (Date.now() - failedAt > BAD_KEY_COOLDOWN_MS) {
+    badKeys.delete(key); // cooldown expired, retry
+    return true;
+  }
+  return false;
+}
+
+function markKeyBad(key: string): void {
+  badKeys.set(key, Date.now());
+  console.warn(`[gemini] Key ...${key.slice(-4)} marked bad, cooldown ${BAD_KEY_COOLDOWN_MS / 1000}s`);
+}
+
+/** Call Gemini API with automatic key rotation and retry on failure */
 export async function callGemini(options: GeminiRequestOptions): Promise<{
   text: string;
   usage: GeminiResponse['usageMetadata'];
 }> {
   const { prompt, imagePaths, callType, projectId, systemInstruction, useGrounding } = options;
   const model = getGeminiModel();
-  const key = getGeminiApiKey();
 
-  try {
-    return await doGeminiCall(key, model, prompt, imagePaths, callType, projectId, systemInstruction, useGrounding);
-  } catch (err: any) {
-    if (err.status === 429) {
-      // Retry with different key
-      const retryKey = getGeminiApiKeyExcluding(key);
-      return await doGeminiCall(retryKey, model, prompt, imagePaths, callType, projectId, systemInstruction, useGrounding);
-    }
-    throw err;
+  // Try up to 3 different keys
+  const triedKeys = new Set<string>();
+  let lastErr: any = null;
+
+  // Collect keys to skip (already tried + known bad)
+  const skipKeys = new Set<string>();
+  for (const [k, t] of badKeys) {
+    if (Date.now() - t < BAD_KEY_COOLDOWN_MS) skipKeys.add(k);
   }
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const key = getGeminiApiKey(undefined, skipKeys);
+    if (triedKeys.has(key)) continue; // already tried this exact key
+    triedKeys.add(key);
+    skipKeys.add(key);
+
+    try {
+      return await doGeminiCall(key, model, prompt, imagePaths, callType, projectId, systemInstruction, useGrounding);
+    } catch (err: any) {
+      lastErr = err;
+      if (err.status === 429 || err.status === 403 || err.status === 400) {
+        markKeyBad(key);
+        continue; // try next key
+      }
+      throw err; // non-retryable error
+    }
+  }
+
+  throw lastErr ?? new Error('All Gemini API keys exhausted');
 }
 
 async function doGeminiCall(
