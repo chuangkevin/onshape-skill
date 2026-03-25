@@ -1068,7 +1068,7 @@ function setupEvents(): void {
     if (!photo?.drawings?.length) return;
 
     // Get contour in mm
-    const contour = photo.drawings.find(d => d.type === 'polyline' && d.closed);
+    const contour = photo.drawings.find(d => d.type === 'polyline' && d.closed && !d.id.startsWith('roi_'));
     if (!contour) return;
 
     const scale = photo.scale?.px_per_mm || 1;
