@@ -1485,10 +1485,17 @@ function updateWizard(): void {
       activateTool('polyline', true);
     });
   } else if (wizardStep === 6) {
+    // Enable right-panel buttons so wizard delegates work
+    previewCadBtn.disabled = false;
+    genFeatureScriptBtn.disabled = false;
+    nextSteps.style.display = 'flex';
+
     document.getElementById('wizPreviewBtn')?.addEventListener('click', () => {
+      previewCadBtn.disabled = false;
       previewCadBtn.click();
     });
     document.getElementById('wizGenFSBtn')?.addEventListener('click', () => {
+      genFeatureScriptBtn.disabled = false;
       genFeatureScriptBtn.click();
     });
     document.getElementById('wizExportBtn')?.addEventListener('click', () => {
