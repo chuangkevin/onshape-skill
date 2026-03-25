@@ -54,12 +54,15 @@ export class DrawingLayer {
 
   private drawShape(shape: DrawingShape, color: string, lineWidth: number, t?: { scale: number; offsetX: number; offsetY: number }, highlight?: { shapeId: string; hoveredVertexIndex: number; hoveredEdgeIndex: number; selectedVertexIndex: number }): void {
     const { ctx } = this;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
+    // ROI shapes use distinct dashed style
+    const isRoi = shape.id.startsWith('roi_');
+    ctx.strokeStyle = isRoi ? '#1f6feb' : color;
+    ctx.lineWidth = isRoi ? 2.5 / (t?.scale ?? 1) : lineWidth;
     ctx.lineJoin = 'round';
+    if (isRoi) ctx.setLineDash([8 / (t?.scale ?? 1), 4 / (t?.scale ?? 1)]);
 
     if (shape.type === 'polyline') {
-      if (shape.points_px.length < 2) return;
+      if (shape.points_px.length < 2) { if (isRoi) ctx.setLineDash([]); return; }
       ctx.beginPath();
       ctx.moveTo(shape.points_px[0].x, shape.points_px[0].y);
       for (let i = 1; i < shape.points_px.length; i++) {
@@ -74,6 +77,14 @@ export class DrawingLayer {
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 4 / this.photoLayer.getTransform().scale, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      if (isRoi) {
+        // Semi-transparent fill to show ROI area
+        ctx.fillStyle = 'rgba(31, 111, 235, 0.08)';
+        ctx.fill();
+        ctx.setLineDash([]);
+        return;
       }
 
       // Highlight overlay for edit-contour tool
@@ -153,9 +164,12 @@ export class DrawingLayer {
 
   private drawActivePreview(viewScale: number): void {
     const { ctx, activePoints, cursorPos } = this;
-    if (activePoints.length === 0 || !cursorPos) return;
+    if (activePoints.length === 0) return;
 
-    ctx.strokeStyle = '#ffaa00';
+    // ROI rectangle preview: 4 points, closed, no cursor line
+    const isRoiPreview = activePoints.length === 4;
+
+    ctx.strokeStyle = isRoiPreview ? '#1f6feb' : '#ffaa00';
     ctx.lineWidth = 2 / viewScale;
     ctx.setLineDash([6 / viewScale, 4 / viewScale]);
 
@@ -164,16 +178,24 @@ export class DrawingLayer {
     for (let i = 1; i < activePoints.length; i++) {
       ctx.lineTo(activePoints[i].x, activePoints[i].y);
     }
-    ctx.lineTo(cursorPos.x, cursorPos.y);
+    if (isRoiPreview) {
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(31, 111, 235, 0.1)';
+      ctx.fill();
+    } else if (cursorPos) {
+      ctx.lineTo(cursorPos.x, cursorPos.y);
+    }
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Draw placed vertices
-    ctx.fillStyle = '#ffaa00';
-    for (const pt of activePoints) {
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 4 / viewScale, 0, Math.PI * 2);
-      ctx.fill();
+    // Draw placed vertices (skip for ROI)
+    if (!isRoiPreview) {
+      ctx.fillStyle = '#ffaa00';
+      for (const pt of activePoints) {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 4 / viewScale, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 

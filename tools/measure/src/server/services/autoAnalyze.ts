@@ -200,6 +200,7 @@ export async function runAutoAnalysis(
   res: Response,
   projectId: number,
   photoId: number,
+  userRoi?: { x1: number; y1: number; x2: number; y2: number },
 ): Promise<void> {
   const timeout = setTimeout(() => {
     emitError(res, 'Auto-analysis timed out after 60 seconds');
@@ -248,20 +249,23 @@ export async function runAutoAnalysis(
 
     // Layer 0: FastSAM segmentation
     try {
-      // Add 10% padding around the bbox so features like bottom connector brackets
-      // (which protrude beyond the main key area) are included in the crop.
-      const fastSamRoi = bboxResult?.found
-        ? (() => {
-            const padX = Math.round(bboxResult.width! * 0.10);
-            const padY = Math.round(bboxResult.height! * 0.10);
-            return {
-              x1: Math.max(0, bboxResult.x! - padX),
-              y1: Math.max(0, bboxResult.y! - padY),
-              x2: bboxResult.x! + bboxResult.width! + padX,
-              y2: bboxResult.y! + bboxResult.height! + padY,
-            };
-          })()
-        : undefined;
+      // User-drawn ROI takes priority over Gemini bbox.
+      // If no user ROI, add 10% padding around the Gemini bbox so features like
+      // bottom connector brackets are included in the crop.
+      const fastSamRoi = userRoi
+        ? userRoi
+        : bboxResult?.found
+          ? (() => {
+              const padX = Math.round(bboxResult.width! * 0.10);
+              const padY = Math.round(bboxResult.height! * 0.10);
+              return {
+                x1: Math.max(0, bboxResult.x! - padX),
+                y1: Math.max(0, bboxResult.y! - padY),
+                x2: bboxResult.x! + bboxResult.width! + padX,
+                y2: bboxResult.y! + bboxResult.height! + padY,
+              };
+            })()
+          : undefined;
       const fastSamResult = await detectContourWithFastSAM(imagePath, fastSamRoi);
 
       // Use FastSAM's reported image size when available

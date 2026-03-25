@@ -98,7 +98,16 @@ router.get('/:projectId/photos/:photoId/auto-analyze', async (req, res) => {
     res.end();
   });
 
-  await runAutoAnalysis(res, parseInt(req.params.projectId), photo.id);
+  // Parse optional ROI from query: ?roi=x1,y1,x2,y2
+  let roi: { x1: number; y1: number; x2: number; y2: number } | undefined;
+  if (typeof req.query.roi === 'string') {
+    const parts = req.query.roi.split(',').map(Number);
+    if (parts.length === 4 && parts.every((n) => !isNaN(n))) {
+      roi = { x1: parts[0], y1: parts[1], x2: parts[2], y2: parts[3] };
+    }
+  }
+
+  await runAutoAnalysis(res, parseInt(req.params.projectId), photo.id, roi);
 });
 
 // POST /api/projects/:projectId/photos/:photoId/auto-contour

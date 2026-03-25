@@ -262,6 +262,7 @@
         <button type="button" class="tool-btn" data-tool="arc">弧線</button>
         <button type="button" class="tool-btn" data-tool="hole">圓孔</button>
         <div class="tool-sep"></div>
+        <button type="button" class="tool-btn" data-tool="roi">框選範圍</button>
         <button type="button" class="tool-btn" data-tool="scale">比例尺</button>
         <div class="tool-sep"></div>
         <button type="button" class="tool-btn" id="undoBtn">復原</button>
@@ -273,13 +274,15 @@
         <div class="wizard-steps">
           <span class="wiz-step active" data-wstep="1">① 上傳照片</span>
           <span class="wiz-arrow">→</span>
-          <span class="wiz-step" data-wstep="2">② 確認比例尺</span>
+          <span class="wiz-step" data-wstep="2">② 框選範圍</span>
           <span class="wiz-arrow">→</span>
-          <span class="wiz-step" data-wstep="3">③ 確認輪廓</span>
+          <span class="wiz-step" data-wstep="3">③ 確認比例尺</span>
           <span class="wiz-arrow">→</span>
-          <span class="wiz-step" data-wstep="4">④ 補充特徵</span>
+          <span class="wiz-step" data-wstep="4">④ 確認輪廓</span>
           <span class="wiz-arrow">→</span>
-          <span class="wiz-step" data-wstep="5">⑤ 匯出</span>
+          <span class="wiz-step" data-wstep="5">⑤ 補充特徵</span>
+          <span class="wiz-arrow">→</span>
+          <span class="wiz-step" data-wstep="6">⑥ 匯出</span>
         </div>
         <div class="wizard-body" id="wizardBody">
           <!-- Dynamic content per step -->

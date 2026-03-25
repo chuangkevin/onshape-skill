@@ -7,6 +7,7 @@ import { activateScaleTool } from './tools/ScaleTool.js';
 import { activateHoleTool } from './tools/HoleTool.js';
 import { activateSelectTool } from './tools/SelectTool.js';
 import { activateEditContourTool, getContourHighlight } from './tools/EditContourTool.js';
+import { activateRoiTool, getActiveRoi } from './tools/RoiTool.js';
 import * as api from './api/client.js';
 import { createCadPreview } from './preview/CadPreview.js';
 import type { ViewAngle } from '@shared/types.js';
@@ -77,12 +78,13 @@ const TOOL_HINTS: Record<string, string> = {
   polyline: '沿零件邊緣逐點點擊，按 Enter 或雙擊結束封閉輪廓',
   arc: '依序點擊起點、中點、終點繪製弧線',
   hole: '在圓孔中心按住拖曳到邊緣，自動計算半徑',
+  roi: '拖曳框選 AI 分析的有效範圍，排除不需要的背景區域',
   scale: '第一步：在照片中的尺規上點擊兩個刻度點',
   'edit-contour': '點擊頂點選取 → Delete 刪除 | 拖曳移動 | 雙擊線段新增點',
 };
 
 const TOOL_NAMES: Record<string, string> = {
-  select: '選取', polyline: '多邊形', arc: '弧線', hole: '圓孔', scale: '比例尺', 'edit-contour': '編輯輪廓',
+  select: '選取', polyline: '多邊形', arc: '弧線', hole: '圓孔', roi: '框選範圍', scale: '比例尺', 'edit-contour': '編輯輪廓',
 };
 
 // ── Canvas Layers ──
@@ -99,6 +101,9 @@ let _isRendering = false;
 
 store.subscribe(() => {
   autoAdvance();
+
+  // When ROI is drawn in wizard mode, update wizard to show confirm button
+  // (AI analysis only starts after user clicks confirm)
 
   // Sync scale to DB whenever it changes
   const photo = store.getActivePhoto();
@@ -133,6 +138,20 @@ let hasUnsavedDrawing = false; // Track if user is mid-drawing
 
 function setUnsavedDrawing(v: boolean): void { hasUnsavedDrawing = v; }
 
+/** In wizard mode, restrict which toolbar tools are available per step */
+function getWizardAllowedTools(): string[] | null {
+  if (currentMode !== 'wizard') return null; // free mode: all tools
+  switch (wizardStep) {
+    case 1: return ['select'];
+    case 2: return ['select', 'roi'];
+    case 3: return ['select', 'scale'];
+    case 4: return ['select', 'polyline', 'edit-contour'];
+    case 5: return ['select', 'hole'];
+    case 6: return ['select'];
+    default: return null;
+  }
+}
+
 function activateTool(tool: ToolType, force = false): void {
   // Confirm if user has unsaved in-progress drawing
   if (!force && (hasUnsavedDrawing || isDrawingInProgress)) {
@@ -160,6 +179,9 @@ function activateTool(tool: ToolType, force = false): void {
       break;
     case 'edit-contour':
       cleanupTool = activateEditContourTool(drawingCanvas, photoLayer, renderDrawingsWithHighlight);
+      break;
+    case 'roi':
+      cleanupTool = activateRoiTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);
       break;
   }
 
@@ -357,7 +379,10 @@ function clearProjectState(): void {
 function startAutoAnalysis(projectId: number, photoId: number): void {
   autoAnalysisResults = null;
 
-  const es = new EventSource(`/api/projects/${projectId}/photos/${photoId}/auto-analyze`);
+  // Append user-drawn ROI as query param if available
+  const roi = getActiveRoi();
+  const roiParam = roi ? `?roi=${roi.x1},${roi.y1},${roi.x2},${roi.y2}` : '';
+  const es = new EventSource(`/api/projects/${projectId}/photos/${photoId}/auto-analyze${roiParam}`);
   _activeEventSource = es;
 
   // Update wizard body with progress
@@ -376,7 +401,7 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
     html += '</div>';
 
     const body = document.getElementById('wizardBody');
-    if (body && wizardStep === 1) {
+    if (body && wizardStep === 2) {
       body.innerHTML = `<p>AI 正在分析照片...</p>${html}`;
     }
   };
@@ -425,9 +450,9 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
       _activeEventSource = null;
       autoAnalysisResults = { ...autoAnalysisResults, ...data.result };
 
-      // Auto-advance wizard to step 2
-      if (currentMode === 'wizard' && wizardStep === 1) {
-        wizardStep = 2;
+      // Auto-advance wizard: after AI complete, go to step 3 (confirm scale)
+      if (currentMode === 'wizard' && wizardStep === 2) {
+        wizardStep = 3;
         updateWizard();
       }
       return;
@@ -474,12 +499,12 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
     es.close();
     _activeEventSource = null;
     // Show error, don't auto-advance
-    if (currentMode === 'wizard' && wizardStep === 1) {
+    if (currentMode === 'wizard' && wizardStep === 2) {
       const body = document.getElementById('wizardBody');
       if (body) {
         body.innerHTML = `
           <p style="color:#f85149;">AI 自動分析連線失敗</p>
-          <p style="color:#8b949e;margin-top:4px;">請點擊「下一步」手動操作，或重新上傳照片</p>`;
+          <p style="color:#8b949e;margin-top:4px;">請點擊「下一步」手動操作</p>`;
       }
     }
   };
@@ -571,9 +596,10 @@ async function openProject(projectId: number, pushHistory = true): Promise<void>
     if (savedMode === 'wizard') {
       const photo = store.getActivePhoto();
       if (!store.getState().photos.length) wizardStep = 1;
-      else if (!photo?.scale) wizardStep = 2;
-      else if (!photo.drawings.length) wizardStep = 3;
-      else wizardStep = 4;
+      else if (!photo?.drawings.some(d => d.id.startsWith('roi_'))) wizardStep = 2;
+      else if (!photo?.scale) wizardStep = 3;
+      else if (!photo.drawings.some(d => !d.id.startsWith('roi_'))) wizardStep = 4;
+      else wizardStep = 5;
       updateWizard();
     }
   } else {
@@ -595,9 +621,18 @@ function renderUI(): void {
   projectNameEl.textContent = state.projectName || '尚無專案';
   sidebarProjectName.textContent = state.projectName || '';
 
-  // Tool buttons
+  // Tool buttons — lock per wizard step
+  const allowedTools = getWizardAllowedTools();
   document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {
-    btn.classList.toggle('active', (btn as HTMLElement).dataset.tool === state.activeTool);
+    const tool = (btn as HTMLElement).dataset.tool as string;
+    btn.classList.toggle('active', tool === state.activeTool);
+    if (allowedTools) {
+      (btn as HTMLButtonElement).disabled = !allowedTools.includes(tool);
+      (btn as HTMLElement).style.opacity = allowedTools.includes(tool) ? '1' : '0.3';
+    } else {
+      (btn as HTMLButtonElement).disabled = false;
+      (btn as HTMLElement).style.opacity = '1';
+    }
   });
   statusTool.textContent = `工具：${TOOL_NAMES[state.activeTool] ?? state.activeTool}`;
 
@@ -700,10 +735,12 @@ async function handleFiles(files: FileList | File[]): Promise<void> {
   await loadPhoto(photos[photos.length - 1]);
   renderUI();
 
-  // In wizard mode: start auto-analysis; in free mode: switch to scale tool
+  // In wizard mode: go to ROI step; in free mode: switch to scale tool
   const photo = store.getActivePhoto();
-  if (currentMode === 'wizard' && photo && store.getState().projectId) {
-    startAutoAnalysis(store.getState().projectId!, photo.id);
+  if (currentMode === 'wizard' && photo) {
+    wizardStep = 2;
+    activateTool('roi', true);
+    updateWizard();
   } else {
     setTimeout(() => {
       activateTool('scale');
@@ -1234,11 +1271,12 @@ function setupModeEvents(): void {
 
 // ── Wizard Logic ──
 const WIZARD_INSTRUCTIONS: Record<number, string> = {
-  1: '拖曳照片到下方區域，上傳後自動開始 AI 分析...',
-  2: 'AI 偵測到的比例尺如下，請確認或手動覆蓋',
-  3: 'AI 偵測到的輪廓如下，請確認、微調或重繪',
-  4: '確認 AI 偵測結果，可勾選/編輯後進入下一步',
-  5: '預覽 CAD 模型或生成 FeatureScript，確認後匯出',
+  1: '拖曳照片到下方區域，或點擊左側「+ 新增照片」',
+  2: '用滑鼠拖曳框選零件的有效範圍（排除不需要的背景），完成後自動開始 AI 分析',
+  3: 'AI 偵測到的比例尺如下，請確認或手動覆蓋',
+  4: 'AI 偵測到的輪廓如下，請確認、微調或重繪',
+  5: '確認 AI 偵測結果，可勾選/編輯後進入下一步',
+  6: '預覽 CAD 模型或生成 FeatureScript，確認後匯出',
 };
 
 function updateWizard(): void {
@@ -1256,6 +1294,28 @@ function updateWizard(): void {
   let bodyHtml = `<p>${WIZARD_INSTRUCTIONS[wizardStep]}</p>`;
 
   if (wizardStep === 2) {
+    // ROI selection step
+    const photo = store.getActivePhoto();
+    const hasRoi = photo?.drawings.some(d => d.id.startsWith('roi_'));
+    if (_activeEventSource) {
+      // AI analysis in progress
+      bodyHtml = `
+        <p>已框選分析範圍 ✅</p>
+        <p style="color:#8b949e;">正在進行 AI 分析...</p>`;
+    } else if (hasRoi) {
+      // ROI drawn, waiting for user to confirm
+      bodyHtml = `
+        <p>已框選分析範圍，確認後開始 AI 分析</p>
+        <p style="color:#8b949e;">不滿意可重新拖曳框選</p>
+        <div style="margin-top:12px;">
+          <button type="button" class="tool-btn primary" id="wizConfirmRoi">確認，開始分析</button>
+          <button type="button" class="tool-btn" id="wizClearRoi">清除重選</button>
+        </div>`;
+    } else {
+      bodyHtml = `<p>${WIZARD_INSTRUCTIONS[2]}</p>`;
+      activateTool('roi', true);
+    }
+  } else if (wizardStep === 3) {
     const photo = store.getActivePhoto();
     if (photo?.scale) {
       // Scale already set (from auto-analysis or manual)
@@ -1281,9 +1341,9 @@ function updateWizard(): void {
         activateTool('scale', true);
       }
     }
-  } else if (wizardStep === 3) {
+  } else if (wizardStep === 4) {
     const photo = store.getActivePhoto();
-    const existingDrawings = photo?.drawings || [];
+    const existingDrawings = (photo?.drawings || []).filter(d => !d.id.startsWith('roi_'));
 
     if (existingDrawings.length > 0) {
       // Drawings already exist in store (from SSE auto-add or manual)
@@ -1327,7 +1387,7 @@ function updateWizard(): void {
         activateTool('polyline', true);
       }
     }
-  } else if (wizardStep === 4) {
+  } else if (wizardStep === 5) {
     // Show AI results confirmation in wizard body
     if (confirmedItems.length > 0) {
       bodyHtml = `<p>請確認以下 AI 偵測結果（可勾選/編輯）：</p>`;
@@ -1336,7 +1396,7 @@ function updateWizard(): void {
     }
     // Also render AI results panel in the sidebar
     renderAiResultsPanel();
-  } else if (wizardStep === 5) {
+  } else if (wizardStep === 6) {
     const hasContour = (store.getActivePhoto()?.drawings?.length || 0) > 0;
     bodyHtml = `
       <p>預覽、生成程式碼或匯出</p>
@@ -1352,11 +1412,28 @@ function updateWizard(): void {
 
   // Wire up step-specific buttons after innerHTML is set
   if (wizardStep === 2) {
+    document.getElementById('wizConfirmRoi')?.addEventListener('click', () => {
+      const state = store.getState();
+      const photo = store.getActivePhoto();
+      if (photo && state.projectId) {
+        startAutoAnalysis(state.projectId, photo.id);
+        updateWizard();
+      }
+    });
+    document.getElementById('wizClearRoi')?.addEventListener('click', () => {
+      const photo = store.getActivePhoto();
+      if (photo) {
+        const roi = photo.drawings.find(d => d.id.startsWith('roi_'));
+        if (roi) store.removeDrawing(roi.id);
+      }
+      activateTool('roi', true);
+      updateWizard();
+    });
+  } else if (wizardStep === 3) {
     document.getElementById('wizConfirmScale')?.addEventListener('click', () => {
       const photo = store.getActivePhoto();
       if (photo?.scale) {
-        // Scale already in store (from SSE auto-set or manual), just advance
-        wizardStep = 3;
+        wizardStep = 4;
         updateWizard();
         renderUI();
       } else {
@@ -1368,8 +1445,7 @@ function updateWizard(): void {
             distance_mm: ruler.distance_mm,
             px_per_mm: ruler.px_per_mm,
           });
-          // DB sync happens via store.subscribe
-          wizardStep = 3;
+          wizardStep = 4;
           updateWizard();
           renderUI();
         }
@@ -1378,15 +1454,14 @@ function updateWizard(): void {
     document.getElementById('wizManualScale')?.addEventListener('click', () => {
       activateTool('scale', true);
     });
-  } else if (wizardStep === 3) {
+  } else if (wizardStep === 4) {
     document.getElementById('wizConfirmContour')?.addEventListener('click', () => {
-      wizardStep = 4;
+      wizardStep = 5;
       updateWizard();
       renderUI();
     });
     document.getElementById('wizEditContour')?.addEventListener('click', () => {
       activateTool('edit-contour', true);
-      // Update wizard body to show edit instructions
       const body = document.getElementById('wizardBody');
       if (body) {
         body.innerHTML = `
@@ -1406,7 +1481,7 @@ function updateWizard(): void {
       renderDrawings();
       activateTool('polyline', true);
     });
-  } else if (wizardStep === 5) {
+  } else if (wizardStep === 6) {
     document.getElementById('wizPreviewBtn')?.addEventListener('click', () => {
       previewCadBtn.click();
     });
@@ -1435,16 +1510,20 @@ function wizardAdvanceWithCheck(): void {
     alert('請先上傳至少一張照片');
     return;
   }
-  if (wizardStep === 2 && !photo?.scale) {
+  if (wizardStep === 2 && !photo?.drawings.some(d => d.id.startsWith('roi_'))) {
+    alert('請先用「框選範圍」框選零件的有效範圍');
+    return;
+  }
+  if (wizardStep === 3 && !photo?.scale) {
     alert('請先完成比例尺校準');
     return;
   }
-  if (wizardStep === 3 && (!photo || photo.drawings.length === 0)) {
+  if (wizardStep === 4 && (!photo || !photo.drawings.some(d => !d.id.startsWith('roi_')))) {
     alert('請先描繪至少一個輪廓');
     return;
   }
 
-  if (wizardStep < 5) {
+  if (wizardStep < 6) {
     wizardStep++;
     updateWizard();
   }
