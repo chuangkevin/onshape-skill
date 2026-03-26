@@ -5,7 +5,7 @@ let cachedKeys: string[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 60_000;
 
-let keyIndex = 0;
+// keyIndex removed — using random selection to distribute load evenly
 
 function loadKeys(db?: Database.Database): string[] {
   const now = Date.now();
@@ -50,27 +50,25 @@ function loadKeys(db?: Database.Database): string[] {
   return cachedKeys;
 }
 
-/** Get the next API key via round-robin rotation.
- *  Optional skipKeys set to avoid keys known to be bad. */
+/** Get a random API key, skipping known bad keys.
+ *  Random selection distributes load evenly across all keys. */
 export function getGeminiApiKey(db?: Database.Database, skipKeys?: Set<string>): string {
   const keys = loadKeys(db);
   if (keys.length === 0) {
     throw new Error('No Gemini API keys configured');
   }
 
-  // Try all keys starting from current index
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[(keyIndex + i) % keys.length];
-    if (!skipKeys || !skipKeys.has(key)) {
-      keyIndex = (keyIndex + i + 1) % keys.length;
-      return key;
-    }
+  // Filter out bad keys
+  const available = skipKeys
+    ? keys.filter(k => !skipKeys.has(k))
+    : keys;
+
+  if (available.length > 0) {
+    return available[Math.floor(Math.random() * available.length)];
   }
 
-  // All keys are in skipKeys, return next anyway
-  const key = keys[keyIndex % keys.length];
-  keyIndex++;
-  return key;
+  // All keys are in skipKeys, pick random anyway
+  return keys[Math.floor(Math.random() * keys.length)];
 }
 
 /** Get a key excluding the failed one (for 429 failover) */
@@ -201,7 +199,7 @@ export function invalidateKeyCache(): void {
   cacheTimestamp = 0;
 }
 
-/** Reset key index (for testing) */
+/** Reset key state (for testing) */
 export function resetKeyIndex(): void {
-  keyIndex = 0;
+  // No-op: random selection doesn't need reset
 }
