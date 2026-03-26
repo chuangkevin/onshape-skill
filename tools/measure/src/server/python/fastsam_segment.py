@@ -137,7 +137,9 @@ def remove_spikes(contour, perimeter):
     if len(cleaned) < 4:
         return contour  # don't over-simplify
 
-    return np.array(cleaned, dtype=np.int32).reshape(-1, 1, 2)
+    # Reconstruct contour array without top-level numpy dependency
+    import numpy as _np
+    return _np.array(cleaned, dtype=_np.int32).reshape(-1, 1, 2)
 
 
 MIN_CONTOUR_POINTS = 6
