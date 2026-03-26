@@ -33,6 +33,58 @@ const FIT_PADDING = 1.4;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+/** Ensure counter-clockwise winding (required by Three.js Shape) */
+function ensureCCW(pts: { x: number; y: number }[]): { x: number; y: number }[] {
+  // Signed area: positive = CCW, negative = CW
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+  }
+  return area >= 0 ? pts : [...pts].reverse();
+}
+
+/** Douglas-Peucker simplification for preview (reduce triangulation complexity) */
+function simplifyForPreview(pts: { x: number; y: number }[], maxPts = 30): { x: number; y: number }[] {
+  if (pts.length <= maxPts) return pts;
+
+  function perpDist(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  function dp(points: { x: number; y: number }[], eps: number): { x: number; y: number }[] {
+    if (points.length <= 2) return points;
+    let maxD = 0, maxI = 0;
+    for (let i = 1; i < points.length - 1; i++) {
+      const d = perpDist(points[i], points[0], points[points.length - 1]);
+      if (d > maxD) { maxD = d; maxI = i; }
+    }
+    if (maxD > eps) {
+      const left = dp(points.slice(0, maxI + 1), eps);
+      const right = dp(points.slice(maxI), eps);
+      return [...left.slice(0, -1), ...right];
+    }
+    return [points[0], points[points.length - 1]];
+  }
+
+  // Binary search for epsilon that gives ~maxPts
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  let lo = 0, hi = diag * 0.1, best = pts;
+  for (let i = 0; i < 15; i++) {
+    const mid = (lo + hi) / 2;
+    const r = dp(pts, mid);
+    if (r.length > maxPts) lo = mid; else hi = mid;
+    best = r;
+    if (r.length >= maxPts - 5 && r.length <= maxPts) break;
+  }
+  return best;
+}
+
 function buildShape(
   contour: { x: number; y: number }[],
   features?: CadPreviewOptions['features'],
@@ -41,9 +93,13 @@ function buildShape(
 
   if (contour.length === 0) return shape;
 
-  shape.moveTo(contour[0].x, contour[0].y);
-  for (let i = 1; i < contour.length; i++) {
-    shape.lineTo(contour[i].x, contour[i].y);
+  // Simplify + ensure CCW winding for clean triangulation
+  let pts = simplifyForPreview(contour, 30);
+  pts = ensureCCW(pts);
+
+  shape.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) {
+    shape.lineTo(pts[i].x, pts[i].y);
   }
   shape.closePath();
 
