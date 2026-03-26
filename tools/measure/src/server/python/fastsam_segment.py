@@ -142,6 +142,68 @@ def remove_spikes(contour, perimeter):
     return _np.array(cleaned, dtype=_np.int32).reshape(-1, 1, 2)
 
 
+def remove_zigzag(contour, perimeter):
+    """Remove zigzag/sawtooth segments caused by ruler contamination.
+    Detects rapid Y oscillation between two levels and replaces with smooth edge."""
+    if len(contour) < 10:
+        return contour
+
+    pts = contour.reshape(-1, 2).tolist()
+    n = len(pts)
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    bbox_w = max(xs) - min(xs) if xs else 1
+    bbox_h = max(ys) - min(ys) if ys else 1
+
+    # Strategy: find consecutive segments where Y oscillates (changes direction)
+    # more than once within a small distance. Flag those points.
+    zigzag_flags = [False] * n
+
+    # Pass 1: detect Y-oscillation with window of 3 consecutive segments
+    for i in range(1, n - 1):
+        prev_dy = pts[i][1] - pts[i-1][1]
+        next_dy = pts[(i+1) % n][1] - pts[i][1]
+        # Y reversal at this point
+        if prev_dy * next_dy < 0 and abs(prev_dy) > 5 and abs(next_dy) > 5:
+            # Check: is this a SMALL feature (not a real tab)?
+            # Real tabs have consistent X extent > 20px
+            local_x_span = abs(pts[(i+1) % n][0] - pts[i-1][0])
+            y_amplitude = abs(prev_dy) + abs(next_dy)
+            if local_x_span < bbox_w * 0.08 or y_amplitude < bbox_h * 0.08:
+                zigzag_flags[i] = True
+
+    # Pass 2: expand flags to neighbors (zigzag usually comes in groups)
+    expanded = list(zigzag_flags)
+    for i in range(n):
+        if zigzag_flags[i]:
+            if i > 0: expanded[i-1] = True
+            if i < n-1: expanded[i+1] = True
+    zigzag_flags = expanded
+
+    # Build cleaned contour: skip zigzag regions, keep entry/exit
+    cleaned = []
+    i = 0
+    while i < n:
+        if not zigzag_flags[i]:
+            cleaned.append(pts[i])
+            i += 1
+        else:
+            start = i
+            while i < n and zigzag_flags[i]:
+                i += 1
+            # Use midpoint of the zigzag region's Y range
+            region = pts[start:i]
+            mid_x = sum(p[0] for p in region) // len(region)
+            mid_y = sum(p[1] for p in region) // len(region)
+            cleaned.append([mid_x, mid_y])
+
+    if len(cleaned) < 4:
+        return contour
+
+    import numpy as _np
+    return _np.array(cleaned, dtype=_np.int32).reshape(-1, 1, 2)
+
+
 MIN_CONTOUR_POINTS = 6
 
 
@@ -318,8 +380,10 @@ def main():
             eps = 0.003 * peri  # 0.3%: preserves concave features like bottom brackets
             simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
 
-            # Post-processing: remove spike artifacts
+            # Post-processing: remove spike artifacts + zigzag (ruler contamination)
             simplified = remove_spikes(simplified, peri)
+            peri2 = cv2.arcLength(simplified, closed=True)
+            simplified = remove_zigzag(simplified, peri2)
 
             hull_points = [
                 [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
