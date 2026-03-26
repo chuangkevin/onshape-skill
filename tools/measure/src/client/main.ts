@@ -178,7 +178,7 @@ function activateTool(tool: ToolType, force = false): void {
       cleanupTool = activateScaleTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);
       break;
     case 'edit-contour':
-      cleanupTool = activateEditContourTool(drawingCanvas, photoLayer, renderDrawingsWithHighlight);
+      cleanupTool = activateEditContourTool(drawingCanvas, photoLayer, renderDrawingsWithHighlight); // auto-finds contour
       break;
     case 'roi':
       cleanupTool = activateRoiTool(drawingCanvas, photoLayer, drawingLayer, renderDrawingsAndTrack);

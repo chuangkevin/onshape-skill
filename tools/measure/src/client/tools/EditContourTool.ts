@@ -24,8 +24,16 @@ export function activateEditContourTool(
   drawingCanvas: HTMLCanvasElement,
   photoLayer: PhotoLayer,
   renderFn: () => void,
-  targetShapeId: string = 'auto_contour',
+  targetShapeId?: string,
 ): () => void {
+  // Auto-find the contour if no explicit target
+  if (!targetShapeId) {
+    const photo = store.getActivePhoto();
+    const contour = photo?.drawings.find(
+      d => d.type === 'polyline' && d.closed && !d.id.startsWith('roi_')
+    );
+    targetShapeId = contour?.id ?? 'auto_contour';
+  }
   highlight = {
     shapeId: targetShapeId,
     hoveredVertexIndex: -1,
@@ -46,7 +54,7 @@ export function activateEditContourTool(
   }
 
   function updateShapePoints(shape: PolylineShape, newPoints: Point[]): void {
-    store.removeDrawing(targetShapeId);
+    store.removeDrawing(targetShapeId!);
     store.addDrawing({ ...shape, points_px: newPoints });
   }
 
@@ -88,7 +96,11 @@ export function activateEditContourTool(
     return { vertexIdx: bestVertexIdx, edgeIdx: bestEdgeIdx, vertexDist: bestVertexDist, edgeDist: bestEdgeDist };
   }
 
-  const VERTEX_THRESHOLD = 15; // px in image space
+  // Scale-aware threshold: 15px in SCREEN space (not image space)
+  function getThreshold(): number {
+    const t = photoLayer.getTransform();
+    return 15 / t.scale; // Convert screen px to image px
+  }
 
   const onPointerMove = (e: PointerEvent) => {
     if (photoLayer.isPanningNow) return;
@@ -109,6 +121,7 @@ export function activateEditContourTool(
 
     const nearest = findNearest(imgPt);
 
+    const VERTEX_THRESHOLD = getThreshold();
     if (nearest.vertexDist < VERTEX_THRESHOLD) {
       highlight = { ...highlight, hoveredVertexIndex: nearest.vertexIdx, hoveredEdgeIndex: -1 };
       drawingCanvas.style.cursor = 'grab';
