@@ -1080,14 +1080,18 @@ function setupEvents(): void {
       y: p.y / scale,
     }));
 
-    // Get features (holes)
+    // Get features (holes) — HoleTool stores center/radius inside f.shape
     const features = (photo.features || [])
-      .filter((f: any) => f.type === 'hole' && f.center_px)
-      .map((f: any) => ({
-        type: 'hole',
-        center_mm: { x: f.center_px.x / scale, y: f.center_px.y / scale },
-        radius_mm: (f.radius_px || 5) / scale,
-      }));
+      .filter((f: any) => f.type === 'hole' && (f.shape?.center_px || f.center_px))
+      .map((f: any) => {
+        const center = f.shape?.center_px || f.center_px;
+        const radius = f.shape?.radius_px || f.radius_px || 5;
+        return {
+          type: 'hole',
+          center_mm: { x: center.x / scale, y: center.y / scale },
+          radius_mm: radius / scale,
+        };
+      });
 
     // Get thickness from confirmed data or default
     const confirmed = getConfirmedExportData();
