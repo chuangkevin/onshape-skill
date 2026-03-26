@@ -91,6 +91,55 @@ def output_error(message: str):
     print(json.dumps({"error": message, "contours": []}))
 
 
+def remove_spikes(contour, perimeter):
+    """Remove spike artifacts: points that create very sharp angles."""
+    if len(contour) < 6:
+        return contour
+
+    pts = contour.reshape(-1, 2).tolist()
+    n = len(pts)
+    bbox_diag = max(1, perimeter / 4)  # rough estimate
+    spike_thresh = bbox_diag * 0.05     # 5% of bbox diagonal
+
+    cleaned = []
+    for i in range(n):
+        prev_pt = pts[(i - 1) % n]
+        curr_pt = pts[i]
+        next_pt = pts[(i + 1) % n]
+
+        # Vectors from current to prev/next
+        v1 = (prev_pt[0] - curr_pt[0], prev_pt[1] - curr_pt[1])
+        v2 = (next_pt[0] - curr_pt[0], next_pt[1] - curr_pt[1])
+
+        len1 = (v1[0]**2 + v1[1]**2) ** 0.5
+        len2 = (v2[0]**2 + v2[1]**2) ** 0.5
+
+        if len1 < 1 or len2 < 1:
+            continue  # degenerate, skip
+
+        # Cosine of angle at this vertex
+        cos_angle = (v1[0]*v2[0] + v1[1]*v2[1]) / (len1 * len2)
+        cos_angle = max(-1, min(1, cos_angle))
+
+        # Sharp spike: angle < 30° (cos > 0.866) AND spike depth significant
+        # Compute how far this point deviates from the line prev→next
+        dx, dy = next_pt[0] - prev_pt[0], next_pt[1] - prev_pt[1]
+        seg_len = (dx**2 + dy**2) ** 0.5
+        if seg_len > 0:
+            dist = abs(dx * (prev_pt[1] - curr_pt[1]) - dy * (prev_pt[0] - curr_pt[0])) / seg_len
+        else:
+            dist = 0
+
+        is_spike = cos_angle > 0.866 and dist > spike_thresh
+        if not is_spike:
+            cleaned.append(curr_pt)
+
+    if len(cleaned) < 4:
+        return contour  # don't over-simplify
+
+    return np.array(cleaned, dtype=np.int32).reshape(-1, 1, 2)
+
+
 MIN_CONTOUR_POINTS = 6
 
 
@@ -266,6 +315,10 @@ def main():
             peri = cv2.arcLength(best_ctr, closed=True)
             eps = 0.003 * peri  # 0.3%: preserves concave features like bottom brackets
             simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
+
+            # Post-processing: remove spike artifacts
+            simplified = remove_spikes(simplified, peri)
+
             hull_points = [
                 [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
                 for p in simplified
