@@ -306,18 +306,17 @@ def main():
             sys.exit(0)
 
         peri = cv2.arcLength(best_ctr, closed=True)
-        eps = 0.003 * peri
+        # Use tighter epsilon (0.001) for clean threshold contours — avoids over-simplification.
+        # Skip remove_spikes / remove_zigzag: those helpers target noisy FastSAM masks.
+        eps = 0.001 * peri
         simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
-        simplified = remove_spikes(simplified, peri)
-        peri2 = cv2.arcLength(simplified, closed=True)
-        simplified = remove_zigzag(simplified, peri2)
 
         hull_points = [
             [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
             for p in simplified
         ]
 
-        if len(hull_points) < MIN_CONTOUR_POINTS:
+        if len(hull_points) < 4:
             print(json.dumps({"contours": [], "image_size": image_size}))
             sys.exit(0)
 
