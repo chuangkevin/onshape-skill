@@ -202,9 +202,114 @@
     .preview-modal canvas { border-radius:8px; }
     .preview-close { position:absolute; top:16px; right:16px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; font-size:18px; padding:6px 12px; border-radius:6px; cursor:pointer; z-index:201; }
     .preview-close:hover { background:#30363d; }
+
+    /* ── Bottom Navigation (mobile only) ── */
+    #bottomNav {
+      display: none;
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: 56px;
+      background: #161b22; border-top: 1px solid #30363d;
+      z-index: 150;
+    }
+    .bottom-nav-tab {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 2px;
+      background: none; border: none; color: #8b949e;
+      font-size: 11px; cursor: pointer; padding: 4px 0;
+      transition: color 0.2s; min-height: 56px;
+    }
+    .bottom-nav-tab.active { color: #58a6ff; }
+    .bottom-nav-tab .tab-icon { font-size: 20px; line-height: 1; }
+
+    /* ── Mobile Responsive (≤768px) ── */
+    @media (max-width: 768px) {
+      body {
+        height: 100dvh;
+        height: 100vh; /* fallback */
+        overflow: hidden;
+        padding-bottom: 56px; /* room for bottom nav — works because body is flex, not overflow scroll */
+      }
+      @supports (height: 100dvh) {
+        body { height: 100dvh; }
+      }
+
+      /* Header: compact */
+      .header { padding: 6px 12px; gap: 8px; }
+      .header h1 { font-size: 14px; }
+      .header .project-name { font-size: 12px; }
+
+      /* Main: column stack, one panel at a time */
+      .main { flex-direction: column; }
+
+      .sidebar {
+        width: 100%; border-right: none;
+        flex: 1; min-height: 0; overflow-y: auto;
+        display: none;
+      }
+      #canvasColumn {
+        flex: 1; min-height: 0;
+        display: none;
+      }
+      .right-panel {
+        width: 100%; border-left: none;
+        flex: 1; min-height: 0; overflow-y: auto;
+        display: none;
+      }
+
+      /* Active panel visibility */
+      body[data-active-tab="photos"]     .sidebar      { display: flex; }
+      body[data-active-tab="canvas"]     #canvasColumn { display: flex; }
+      body[data-active-tab="properties"] .right-panel  { display: block; }
+
+      /* Show bottom nav */
+      #bottomNav { display: flex; }
+
+      /* Status bar: wrap on small screens */
+      .status-bar { flex-wrap: wrap; gap: 4px; }
+
+      /* Toolbar: wrap on small screens, bigger tap targets */
+      .toolbar { flex-wrap: wrap; padding: 6px 8px; gap: 6px; }
+      .tool-btn { min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 14px; }
+      .tool-sep { height: 1px; width: 100%; margin: 0; display: none; }
+
+      /* Canvas: prevent touch scroll/zoom, no text selection */
+      #drawingCanvas { touch-action: none; user-select: none; -webkit-user-select: none; }
+
+      /* Wizard: scrollable, wrap steps */
+      .wizard { max-height: 40vh; overflow-y: auto; }
+      .wizard-steps { flex-wrap: wrap; gap: 4px; justify-content: flex-start; }
+      .wiz-arrow { display: none; }
+
+      /* Mode selector cards: stack vertically */
+      .mode-cards { flex-direction: column; align-items: center; }
+      .mode-card { width: 100%; max-width: 320px; padding: 20px; }
+
+      /* Settings modal: near full-width */
+      .settings-panel { width: 95vw; max-height: 80dvh; max-height: 80vh; }
+
+      /* Code modal: near full-width */
+      .code-modal-panel { width: 95vw; max-height: 85dvh; max-height: 85vh; }
+
+      /* CAD Preview container: full-width */
+      #previewContainer { width: 95vw !important; height: 60dvh !important; height: 60vh !important; }
+
+      /* Landing page: single column */
+      .landing-content { padding: 16px; }
+      .project-grid { grid-template-columns: 1fr; }
+      .project-landing { padding-bottom: 56px; }
+
+      /* Dropzone: tighter padding on small screens */
+      .dropzone-box { padding: 24px 16px; }
+      .dropzone-box h2 { font-size: 15px; }
+
+      /* Feature/dimension items: tap-friendly */
+      .feature-item { min-height: 44px; }
+      .action-btn { min-height: 44px; font-size: 14px; }
+    }
+
   </style>
 </head>
-<body>
+<body data-active-tab="canvas">
   <!-- Mode Selector Overlay -->
   <div id="modeSelector" class="mode-overlay hidden">
     <h2>選擇操作模式</h2>
@@ -251,11 +356,11 @@
         <h3>照片</h3>
         <div class="photo-list" id="photoList"></div>
         <button type="button" class="action-btn" id="addPhotoBtn" style="margin-top:8px">+ 新增照片</button>
-        <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/webp" style="display:none" />
+        <input type="file" id="fileInput" multiple accept="image/*" capture="environment" style="display:none" />
       </div>
     </div>
 
-    <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+    <div id="canvasColumn" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
       <div class="toolbar">
         <button type="button" class="tool-btn active" data-tool="select">選取</button>
         <button type="button" class="tool-btn" data-tool="polyline">多邊形</button>
@@ -426,6 +531,58 @@
     </div>
   </div>
 
+  <!-- Bottom Navigation (mobile only) -->
+  <nav id="bottomNav">
+    <button class="bottom-nav-tab active" data-tab="canvas" type="button">
+      <span class="tab-icon">✏️</span>
+      <span>畫布</span>
+    </button>
+    <button class="bottom-nav-tab" data-tab="photos" type="button">
+      <span class="tab-icon">📷</span>
+      <span>照片</span>
+    </button>
+    <button class="bottom-nav-tab" data-tab="properties" type="button">
+      <span class="tab-icon">📐</span>
+      <span>屬性</span>
+    </button>
+  </nav>
+
   <script type="module" src="./main.ts"></script>
+
+  <script>
+    // ── Bottom navigation tab switching ──
+    (function () {
+      var tabs = document.querySelectorAll('.bottom-nav-tab');
+      function setTab(tab) {
+        document.body.dataset.activeTab = tab;
+        tabs.forEach(function (btn) {
+          btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+      }
+      tabs.forEach(function (btn) {
+        btn.addEventListener('click', function () { setTab(btn.dataset.tab); });
+      });
+    })();
+
+    // ── Touch-to-mouse forwarding for canvas drawing ──
+    (function () {
+      var canvas = document.getElementById('drawingCanvas');
+      if (!canvas) return;
+      var typeMap = { touchstart: 'mousedown', touchmove: 'mousemove', touchend: 'mouseup' };
+      function forwardTouch(e) {
+        e.preventDefault();
+        var touch = e.changedTouches[0];
+        var evt = new MouseEvent(typeMap[e.type], {
+          bubbles: true, cancelable: true,
+          clientX: touch.clientX, clientY: touch.clientY,
+          button: 0, buttons: e.type === 'touchend' ? 0 : 1,
+        });
+        canvas.dispatchEvent(evt);
+      }
+      canvas.addEventListener('touchstart',  forwardTouch, { passive: false });
+      canvas.addEventListener('touchmove',   forwardTouch, { passive: false });
+      canvas.addEventListener('touchend',    forwardTouch, { passive: false });
+    })();
+  </script>
 </body>
 </html>
