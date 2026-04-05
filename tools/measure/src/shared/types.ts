@@ -179,6 +179,17 @@ export interface MeasurementJSON {
   confidence: { overall: Confidence };
 }
 
+// ── Quality gate ──
+export interface QualityReport {
+  overall_confidence: number;
+  stage_scores: {
+    contour: number;
+    ocr: number;
+  };
+  warnings: string[];
+  flagged_for_review: boolean;
+}
+
 // ── Gemini key pool ──
 export interface ApiKeyStats {
   suffix: string;

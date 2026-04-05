@@ -2,13 +2,14 @@ import { spawn } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { callGemini } from '../geminiClient.js';
-import { parseJsonFromText } from './ruler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FASTSAM_SCRIPT_PATH = resolve(__dirname, '../python/fastsam_segment.py');
 
 const IS_WINDOWS = process.platform === 'win32';
+
+// Configurable minimum confidence for FastSAM contours (env-overridable)
+const FASTSAM_MIN_CONFIDENCE = parseFloat(process.env.FASTSAM_MIN_CONFIDENCE ?? '0.7');
 
 // ---------------------------------------------------------------------------
 // Helpers shared within this module
@@ -68,15 +69,6 @@ export interface FastSAMContourResult {
   image_size?: { width: number; height: number };
 }
 
-export interface GeminiContourResult {
-  found: boolean;
-  contours: Array<{
-    label?: string;
-    contour_px: Array<{ x: number; y: number }>;
-  }>;
-  method: 'gemini';
-}
-
 export interface ContourRoi {
   x: number;
   y: number;
@@ -93,6 +85,9 @@ export interface ContourRoi {
  * The script auto-downloads FastSAM-s.pt if no local model is found.
  * If FastSAM / ultralytics is not installed the script emits
  * `{"error":"fastsam_unavailable"}` — this is handled gracefully.
+ *
+ * Contours with confidence below FASTSAM_MIN_CONFIDENCE are discarded.
+ * Contours with no confidence field are treated as confidence 0 (discarded).
  */
 export async function detectContourWithFastSAM(
   imagePath: string,
@@ -136,7 +131,7 @@ export async function detectContourWithFastSAM(
   }
 
   // Normalise: script may return [[x,y],...] arrays or [{x,y},...] objects
-  const contours = (parsed.contours as any[]).map((c: any) => {
+  const normalised = (parsed.contours as any[]).map((c: any) => {
     const raw: any[] = Array.isArray(c.contour_px) ? c.contour_px : c;
     const contour_px = raw.map((pt: any) =>
       Array.isArray(pt) ? { x: pt[0] as number, y: pt[1] as number } : { x: pt.x as number, y: pt.y as number },
@@ -144,133 +139,20 @@ export async function detectContourWithFastSAM(
     return {
       label: c.label as string | undefined,
       contour_px,
-      confidence: c.confidence as number | undefined,
+      confidence: typeof c.confidence === 'number' ? c.confidence : 0,
     };
   }).filter((c) => c.contour_px.length >= 3);
 
+  // Filter by confidence threshold — contours with no confidence field were set to 0 above
+  const contours = normalised.filter((c) => c.confidence >= FASTSAM_MIN_CONFIDENCE);
+
   if (contours.length === 0) {
+    console.warn(
+      `[contour-fastsam] All ${normalised.length} contour(s) below confidence threshold (${FASTSAM_MIN_CONFIDENCE})`,
+    );
     return { found: false, contours: [], method: 'fastsam', image_size: parsed?.image_size };
   }
 
-  console.log(`[contour-fastsam] Detected ${contours.length} contour(s)`);
+  console.log(`[contour-fastsam] Detected ${contours.length} contour(s) (threshold: ${FASTSAM_MIN_CONFIDENCE})`);
   return { found: true, contours, method: 'fastsam', image_size: parsed?.image_size };
-}
-
-// ---------------------------------------------------------------------------
-// Gemini contour detection
-// ---------------------------------------------------------------------------
-
-/**
- * Build the Gemini contour prompt. When a bbox ROI is provided, include its
- * coordinates so Gemini focuses on the correct region of the full image.
- */
-function buildContourPrompt(roi?: ContourRoi): string {
-  const bboxConstraint = roi
-    ? `OBJECT LOCATION: The object occupies approximately x=${Math.round(roi.x)} to x=${Math.round(roi.x + roi.width)}, y=${Math.round(roi.y)} to y=${Math.round(roi.y + roi.height)} pixels.\n` +
-      `HARD CONSTRAINT: Every contour point MUST have x between ${Math.round(roi.x)} and ${Math.round(roi.x + roi.width)}, and y between ${Math.round(roi.y)} and ${Math.round(roi.y + roi.height)}.\n` +
-      `Do NOT trace any objects outside this region.\n\n`
-    : '';
-
-  return `${bboxConstraint}\
-Analyze this photo. Find the MAIN physical object (not the ruler, not the table, not hands).
-
-Your task: trace the COMPLETE PHYSICAL OUTER BOUNDARY of that ONE object — the silhouette its shadow would make if lit from directly above.
-
-CRITICAL RULES:
-- Include the ENTIRE object body: its plastic/metal chassis, frame, ALL sections (e.g. for a keyboard: main key area AND right navigation cluster AND bottom connector — the full unit)
-- Trace the PHYSICAL OUTER EDGE of the device chassis, NOT just the key/button area
-- Do NOT include separate nearby objects (panels, other devices, etc.)
-- Exclude ruler, table surface, hands, cables
-
-Trace 40-80 coordinate points clockwise from the top-left corner.
-Full-image pixel coordinates (0,0 = top-left, x→right, y→down).
-
-Reply ONLY with JSON, no markdown:
-{"found":true,"contours":[{"label":"<object name>","contour_px":[{"x":10,"y":20},...]}]}
-If no object: {"found":false,"contours":[]}`;
-}
-
-/**
- * Send the full image to Gemini and ask it to detect the contour of the main
- * object. When `roi` is provided its coordinates are embedded in the prompt
- * as a hint so Gemini focuses on the right region — no image cropping needed.
- */
-export async function detectContourWithGemini(
-  imagePath: string,
-  projectId?: number,
-  roi?: ContourRoi,
-): Promise<GeminiContourResult> {
-  const prompt = buildContourPrompt(roi);
-
-  // --- Call Gemini ----------------------------------------------------------
-  const { text } = await callGemini({
-    prompt,
-    imagePaths: [imagePath],
-    callType: 'contour-detection',
-    projectId,
-  });
-
-  // --- Parse response -------------------------------------------------------
-  let parsed: any;
-  try {
-    parsed = parseJsonFromText(text);
-  } catch {
-    console.error('[contour-gemini] Failed to parse Gemini response as JSON:', text);
-    return { found: false, contours: [], method: 'gemini' };
-  }
-
-  if (!parsed || parsed.found !== true) {
-    return { found: false, contours: [], method: 'gemini' };
-  }
-
-  if (!Array.isArray(parsed.contours) || parsed.contours.length === 0) {
-    console.error('[contour-gemini] Response has found:true but no contours:', parsed);
-    return { found: false, contours: [], method: 'gemini' };
-  }
-
-  // Validate and subsample
-  const validContours = parsed.contours
-    .filter((c: any) =>
-      Array.isArray(c.contour_px) &&
-      c.contour_px.length >= 3 &&
-      c.contour_px.every((pt: any) => typeof pt.x === 'number' && typeof pt.y === 'number'),
-    )
-    .map((c: any) => {
-      const MAX_POINTS = 200;
-      let points: Array<{ x: number; y: number }> = c.contour_px.map((pt: any) => ({
-        x: pt.x as number,
-        y: pt.y as number,
-      }));
-      // Clip all points to bbox bounds — prevents Gemini from wandering outside the object region
-      if (roi) {
-        const xMin = roi.x;
-        const xMax = roi.x + roi.width;
-        const yMin = roi.y;
-        const yMax = roi.y + roi.height;
-        points = points.map((pt) => ({
-          x: Math.max(xMin, Math.min(xMax, pt.x)),
-          y: Math.max(yMin, Math.min(yMax, pt.y)),
-        }));
-        // Remove consecutive duplicates created by clipping
-        points = points.filter((pt, i) => i === 0 || pt.x !== points[i - 1].x || pt.y !== points[i - 1].y);
-      }
-      if (points.length > MAX_POINTS) {
-        const step = points.length / MAX_POINTS;
-        points = Array.from({ length: MAX_POINTS }, (_, i) => points[Math.floor(i * step)]);
-      }
-      return { label: c.label as string | undefined, contour_px: points };
-    });
-
-  if (validContours.length === 0) {
-    console.error('[contour-gemini] No valid contours after validation');
-    return { found: false, contours: [], method: 'gemini' };
-  }
-
-  console.log(
-    `[contour-gemini] contour: ${validContours.length} contour(s)` +
-    (roi ? ` (bbox hint: ${Math.round(roi.x)},${Math.round(roi.y)} ${Math.round(roi.width)}x${Math.round(roi.height)})` : '') +
-    `, points: ${validContours.map((c: { contour_px: unknown[] }) => c.contour_px.length).join(',')}`,
-  );
-
-  return { found: true, contours: validContours, method: 'gemini' };
 }

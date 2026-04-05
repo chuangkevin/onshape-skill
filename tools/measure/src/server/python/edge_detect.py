@@ -2,7 +2,7 @@
 OpenCV edge detection and contour extraction for Photo Measure.
 
 Usage:
-    python edge_detect.py <image_path> [roi_json] [epsilon] [--max-size N]
+    python edge_detect.py <image_path> [roi_json] [epsilon] [--max-size N] [--min-contour-area R]
 
 Input:
     image_path: Path to image file
@@ -10,6 +10,8 @@ Input:
     epsilon: Optional approxPolyDP factor (default 0.005)
     --max-size N: Resize image so longest edge <= N px before processing.
                   Output coordinates are scaled back to original image size.
+                  Default: 2048.
+    --min-contour-area R: Minimum contour area as ratio of image area (default 0.005 = 0.5%).
 
 Output:
     JSON to stdout with contours and circles detected.
@@ -21,7 +23,13 @@ import numpy as np
 import cv2
 
 
-def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float = 0.005, max_size: int | None = None) -> dict:
+def detect_edges(
+    image_path: str,
+    roi: dict | None = None,
+    epsilon_factor: float = 0.005,
+    max_size: int = 2048,
+    min_contour_area_ratio: float = 0.005,
+) -> dict:
     """Run edge detection and contour extraction on an image."""
     img = cv2.imread(image_path)
     if img is None:
@@ -31,13 +39,12 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
     scale = 1.0
 
     # Resize so longest edge <= max_size (process at lower res, scale coords back)
-    if max_size is not None:
-        longest = max(orig_w, orig_h)
-        if longest > max_size:
-            scale = longest / max_size
-            new_w = int(round(orig_w / scale))
-            new_h = int(round(orig_h / scale))
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    longest = max(orig_w, orig_h)
+    if longest > max_size:
+        scale = longest / max_size
+        new_w = int(round(orig_w / scale))
+        new_h = int(round(orig_h / scale))
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
     # Scale ROI coordinates to resized image space
     if roi and scale != 1.0:
@@ -71,8 +78,11 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
     # Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    # Canny edge detection
-    edges = cv2.Canny(blurred, 30, 100)
+    # Adaptive Canny thresholds via Otsu binarization
+    otsu_value, _ = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    canny_low = max(30, 0.5 * otsu_value)
+    canny_high = max(60, float(otsu_value))
+    edges = cv2.Canny(blurred, canny_low, canny_high)
 
     # Dilate to close gaps
     kernel = np.ones((5, 5), np.uint8)
@@ -83,7 +93,7 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
 
     # Filter and simplify contours
     contours_result = []
-    min_area = img.shape[0] * img.shape[1] * 0.0001  # Minimum 0.01% of image area
+    min_area = img.shape[0] * img.shape[1] * min_contour_area_ratio
 
     for contour in contours_raw:
         area = cv2.contourArea(contour)
@@ -152,9 +162,11 @@ def detect_edges(image_path: str, roi: dict | None = None, epsilon_factor: float
 
 
 if __name__ == "__main__":
-    # Parse --max-size from argv before positional args
-    max_size = None
+    # Parse --max-size and --min-contour-area from argv before positional args
+    max_size = 2048
+    min_contour_area_ratio = 0.005
     argv = list(sys.argv[1:])
+
     if "--max-size" in argv:
         idx = argv.index("--max-size")
         if idx + 1 < len(argv):
@@ -163,8 +175,16 @@ if __name__ == "__main__":
         else:
             argv = argv[:idx]
 
+    if "--min-contour-area" in argv:
+        idx = argv.index("--min-contour-area")
+        if idx + 1 < len(argv):
+            min_contour_area_ratio = float(argv[idx + 1])
+            argv = argv[:idx] + argv[idx + 2:]
+        else:
+            argv = argv[:idx]
+
     if len(argv) < 1:
-        print(json.dumps({"error": "Usage: edge_detect.py <image_path> [roi_json] [epsilon] [--max-size N]"}))
+        print(json.dumps({"error": "Usage: edge_detect.py <image_path> [roi_json] [epsilon] [--max-size N] [--min-contour-area R]"}))
         sys.exit(1)
 
     image_path = argv[0]
@@ -187,5 +207,5 @@ if __name__ == "__main__":
             except ValueError:
                 pass
 
-    result = detect_edges(image_path, roi, epsilon, max_size)
+    result = detect_edges(image_path, roi, epsilon, max_size, min_contour_area_ratio)
     print(json.dumps(result))

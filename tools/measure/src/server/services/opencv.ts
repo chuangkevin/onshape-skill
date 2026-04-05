@@ -116,7 +116,7 @@ export async function detectEdges(
   const args = [SCRIPT_PATH, imagePath];
   if (roi) args.push(JSON.stringify(roi));
   if (epsilon !== undefined) args.push(String(epsilon));
-  args.push('--max-size', '1024');
+  // --max-size defaults to 2048 in edge_detect.py; --min-contour-area defaults to 0.005
 
   const result = await runCommand(pythonCommand, args);
 

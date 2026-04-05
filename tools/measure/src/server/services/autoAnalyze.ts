@@ -5,7 +5,7 @@ import { existsSync } from 'fs';
 import type { Response } from 'express';
 import { getDb } from '../db.js';
 import { detectRuler, detectObjectBBox } from './ruler.js';
-import { detectContourWithFastSAM, detectContourWithGemini } from './contour.js';
+import { detectContourWithFastSAM } from './contour.js';
 import { extractLabels } from './search.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
 
@@ -289,26 +289,8 @@ export async function runAutoAnalysis(
       console.warn('[autoAnalyze] FastSAM failed, trying Gemini:', e.message);
     }
 
-    // Layer 1: Gemini contour (semantic fallback, bbox hint embedded in prompt)
-    if (!contourResult) {
-      try {
-        const geminiRoi = bboxResult?.found
-          ? { x: bboxResult.x!, y: bboxResult.y!, width: bboxResult.width!, height: bboxResult.height! }
-          : undefined;
-        const geminiContour = await detectContourWithGemini(imagePath, projectId, geminiRoi);
-        if (geminiContour.found && geminiContour.contours.length > 0) {
-          if (isContourQualityOk(geminiContour.contours, bboxResult, imgW, imgH)) {
-            contourResult = { ...geminiContour, method: 'gemini' };
-            console.log(`[autoAnalyze] Contour via Gemini (${geminiContour.contours.length} contour(s))`);
-            emitContourUpdate(res, 'gemini', geminiContour.contours);
-          } else {
-            console.warn('[autoAnalyze] Gemini contour failed quality gate');
-          }
-        }
-      } catch (e: any) {
-        console.warn('[autoAnalyze] Gemini contour also failed:', e.message);
-      }
-    }
+    // Gemini contour detection removed — LLMs cannot reliably produce pixel coordinates.
+    // When FastSAM fails, the pipeline falls back to OpenCV-only contour (handled downstream).
 
     // Emit result
     if (contourResult) {

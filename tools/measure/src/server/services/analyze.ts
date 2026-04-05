@@ -2,14 +2,15 @@ import { resolve } from 'path';
 import { getDb } from '../db.js';
 import { extractOCRReadings } from './ocr.js';
 import { extractLabels, searchOfficialSpecs } from './search.js';
-import { interpretOverlay } from './overlay.js';
 import { detectEdges, deriveROI } from './opencv.js';
+import { evaluateQuality } from './qualityGate.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
-import type { AnalysisResults, OpenCVResult } from '@shared/types.js';
+import type { AnalysisResults, OpenCVResult, QualityReport } from '@shared/types.js';
 
 export interface FullAnalysisResult {
   ai: AnalysisResults;
   opencv: OpenCVResult[];
+  quality: QualityReport;
 }
 
 /** Run full parallel analysis pipeline for a project */
@@ -77,15 +78,21 @@ export async function runAnalysisPipeline(projectId: number): Promise<FullAnalys
     overlay_interpretation: undefined, // Set separately if overlay exists
   };
 
+  // Evaluate pipeline quality
+  const quality = evaluateQuality({ ai: aiResults, opencv: opencvResults });
+  if (quality.flagged_for_review) {
+    console.warn('[analyze] Quality gate flagged for review:', quality.warnings);
+  }
+
   // Store results in DB
   db.prepare(`
     INSERT INTO analysis_results (project_id, result_type, raw_response, parsed_data)
     VALUES (?, 'full_analysis', ?, ?)
   `).run(
     projectId,
-    JSON.stringify({ ai: aiResults, opencv: opencvResults }),
+    JSON.stringify({ ai: aiResults, opencv: opencvResults, quality }),
     JSON.stringify(aiResults),
   );
 
-  return { ai: aiResults, opencv: opencvResults };
+  return { ai: aiResults, opencv: opencvResults, quality };
 }
