@@ -270,18 +270,79 @@
       /* Status bar: wrap on small screens */
       .status-bar { flex-wrap: wrap; gap: 4px; }
 
-      /* Toolbar: wrap on small screens, bigger tap targets */
-      .toolbar { flex-wrap: wrap; padding: 6px 8px; gap: 6px; }
-      .tool-btn { min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 14px; }
-      .tool-sep { height: 1px; width: 100%; margin: 0; display: none; }
+      /* Toolbar: single scrollable row — no wrapping, gives canvas max vertical space */
+      .toolbar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 4px 8px;
+        gap: 4px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-shrink: 0;
+      }
+      .toolbar::-webkit-scrollbar { display: none; }
+      .tool-btn {
+        min-height: 36px;
+        min-width: 36px;
+        padding: 5px 10px;
+        font-size: 13px;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .tool-sep { display: none; }
 
       /* Canvas: prevent touch scroll/zoom, no text selection */
       #drawingCanvas { touch-action: none; user-select: none; -webkit-user-select: none; }
 
-      /* Wizard: scrollable, wrap steps */
-      .wizard { max-height: 40vh; overflow-y: auto; }
-      .wizard-steps { flex-wrap: wrap; gap: 4px; justify-content: flex-start; }
+      /* Workspace: must take all remaining flex space */
+      .workspace { flex: 1; min-height: 0; }
+
+      /* Wizard: ultra-compact on mobile — canvas owns the screen */
+      .wizard {
+        padding: 6px 10px;
+        max-height: none;
+        overflow-y: visible;
+        flex-shrink: 0;
+      }
+      /* Step row: horizontal, scrollable, no wrapping */
+      .wizard-steps {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 4px;
+        justify-content: center;
+        margin-bottom: 4px;
+      }
+      .wizard-steps::-webkit-scrollbar { display: none; }
       .wiz-arrow { display: none; }
+      /* Step pills → compact 28 px circles; overflow clips the Chinese text, leaving only the circled numeral */
+      .wiz-step {
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        padding-left: 5px;
+        line-height: 28px;
+        font-size: 14px;
+        overflow: hidden;
+        white-space: nowrap;
+        border-radius: 50%;
+        flex-shrink: 0;
+        background: #21262d;
+        border: 1px solid #30363d;
+        color: #8b949e;
+        transition: background 0.2s, color 0.2s;
+      }
+      .wiz-step.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+      .wiz-step.done   { background: #238636; border-color: #238636; color: #fff; }
+      /* Wizard instruction text */
+      .wizard-body { padding: 4px 0; min-height: 18px; font-size: 13px; }
+      /* Wizard body inline buttons (確認/清除 etc) — keep compact */
+      .wizard-body .tool-btn { min-height: 34px; padding: 4px 10px; font-size: 13px; }
+      /* Wizard nav row */
+      .wizard-nav { margin-top: 4px; gap: 6px; }
+      .wizard-nav .tool-btn { flex: 1; min-height: 34px; padding: 4px 8px; font-size: 13px; text-align: center; }
 
       /* Mode selector cards: stack vertically */
       .mode-cards { flex-direction: column; align-items: center; }
