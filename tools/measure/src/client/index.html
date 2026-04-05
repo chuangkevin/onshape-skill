@@ -61,6 +61,7 @@
     .action-btn.primary:hover { background: #2ea043; }
     .status-bar { padding: 4px 16px; background: #161b22; border-top: 1px solid #30363d; font-size: 12px; color: #8b949e; display: flex; gap: 16px; }
     #contourSourceLabel { font-size: 11px; color: #888; margin-left: 8px; }
+    #canvasColumn { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
     /* Workflow guide */
     .guide { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; margin: 8px 0; }
@@ -224,8 +225,8 @@
     /* ── Mobile Responsive (≤768px) ── */
     @media (max-width: 768px) {
       body {
-        height: 100dvh;
         height: 100vh; /* fallback */
+        height: 100dvh;
         overflow: hidden;
         padding-bottom: 56px; /* room for bottom nav — works because body is flex, not overflow scroll */
       }
@@ -244,22 +245,24 @@
       .sidebar {
         width: 100%; border-right: none;
         flex: 1; min-height: 0; overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         display: none;
       }
       #canvasColumn {
         flex: 1; min-height: 0;
-        display: none;
+        display: none !important;
       }
       .right-panel {
         width: 100%; border-left: none;
         flex: 1; min-height: 0; overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         display: none;
       }
 
       /* Active panel visibility */
       body[data-active-tab="photos"]     .sidebar      { display: flex; }
-      body[data-active-tab="canvas"]     #canvasColumn { display: flex; }
-      body[data-active-tab="properties"] .right-panel  { display: block; }
+      body[data-active-tab="canvas"]     #canvasColumn { display: flex !important; }
+      body[data-active-tab="properties"] .right-panel  { display: flex; flex-direction: column; }
 
       /* Show bottom nav */
       #bottomNav { display: flex; }
@@ -360,7 +363,7 @@
       </div>
     </div>
 
-    <div id="canvasColumn" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+    <div id="canvasColumn">
       <div class="toolbar">
         <button type="button" class="tool-btn active" data-tool="select">選取</button>
         <button type="button" class="tool-btn" data-tool="polyline">多邊形</button>
@@ -558,30 +561,72 @@
         tabs.forEach(function (btn) {
           btn.classList.toggle('active', btn.dataset.tab === tab);
         });
+        // Re-measure canvas after switching to canvas tab (workspace was hidden)
+        if (tab === 'canvas') {
+          window.dispatchEvent(new Event('resize'));
+        }
       }
       tabs.forEach(function (btn) {
         btn.addEventListener('click', function () { setTab(btn.dataset.tab); });
       });
     })();
 
-    // ── Touch-to-mouse forwarding for canvas drawing ──
+    // ── Touch handling for canvas: single-finger draws, two-finger pinch/pan ──
     (function () {
       var canvas = document.getElementById('drawingCanvas');
       if (!canvas) return;
-      var typeMap = { touchstart: 'mousedown', touchmove: 'mousemove', touchend: 'mouseup' };
-      function forwardTouch(e) {
+
+      var tapStartTime = 0;
+      var tapStartX = 0;
+      var tapStartY = 0;
+      var wasPinching = false;
+
+      canvas.addEventListener('touchstart', function (e) {
+        if (e.touches.length >= 2) {
+          wasPinching = true;
+          // Cancel any ongoing single-finger draw
+          canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, buttons: 0 }));
+          return; // PhotoLayer handles multi-touch
+        }
+        if (wasPinching) return;
         e.preventDefault();
-        var touch = e.changedTouches[0];
-        var evt = new MouseEvent(typeMap[e.type], {
-          bubbles: true, cancelable: true,
-          clientX: touch.clientX, clientY: touch.clientY,
-          button: 0, buttons: e.type === 'touchend' ? 0 : 1,
-        });
-        canvas.dispatchEvent(evt);
-      }
-      canvas.addEventListener('touchstart',  forwardTouch, { passive: false });
-      canvas.addEventListener('touchmove',   forwardTouch, { passive: false });
-      canvas.addEventListener('touchend',    forwardTouch, { passive: false });
+        tapStartTime = Date.now();
+        tapStartX = e.changedTouches[0].clientX;
+        tapStartY = e.changedTouches[0].clientY;
+        var t = e.changedTouches[0];
+        canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: t.clientX, clientY: t.clientY, button: 0, buttons: 1 }));
+      }, { passive: false });
+
+      canvas.addEventListener('touchmove', function (e) {
+        if (e.touches.length >= 2) return; // PhotoLayer handles multi-touch
+        if (wasPinching) return;
+        e.preventDefault();
+        var t = e.changedTouches[0];
+        canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: t.clientX, clientY: t.clientY, button: 0, buttons: 1 }));
+      }, { passive: false });
+
+      canvas.addEventListener('touchend', function (e) {
+        if (e.touches.length >= 1) {
+          // Still has fingers — if coming off pinch, reset flag when all fingers lift
+          return;
+        }
+        if (wasPinching) {
+          wasPinching = false;
+          return;
+        }
+        var t = e.changedTouches[0];
+        canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: t.clientX, clientY: t.clientY, button: 0, buttons: 0 }));
+        // Single-tap → open CAD preview (if available)
+        var elapsed = Date.now() - tapStartTime;
+        var dx = t.clientX - tapStartX;
+        var dy = t.clientY - tapStartY;
+        if (elapsed < 300 && Math.sqrt(dx * dx + dy * dy) < 10) {
+          var previewBtn = document.getElementById('previewCadBtn');
+          if (previewBtn && !previewBtn.disabled) {
+            previewBtn.click();
+          }
+        }
+      }, { passive: false });
     })();
   </script>
 </body>

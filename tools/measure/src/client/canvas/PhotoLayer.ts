@@ -81,6 +81,63 @@ export class PhotoLayer {
 
     // Prevent right-click context menu so right-drag pan works smoothly
     eventTarget.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // ── Two-finger pinch-zoom + pan ──
+    let touchPanActive = false;
+    let touchStartOffsetX = 0;
+    let touchStartOffsetY = 0;
+    let touchStartScale = 0;
+    let touchStartMidX = 0;
+    let touchStartMidY = 0;
+    let touchStartDist = 0;
+    let touchFocalX = 0;
+    let touchFocalY = 0;
+
+    const getTouchDist = (t1: Touch, t2: Touch): number => {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    eventTarget.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        touchPanActive = true;
+        touchStartOffsetX = this._offsetX;
+        touchStartOffsetY = this._offsetY;
+        touchStartScale = this._scale;
+        touchStartMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        touchStartMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        touchStartDist = getTouchDist(e.touches[0], e.touches[1]);
+        const rect = eventTarget.getBoundingClientRect();
+        touchFocalX = touchStartMidX - rect.left;
+        touchFocalY = touchStartMidY - rect.top;
+      }
+    }, { passive: false });
+
+    eventTarget.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && touchPanActive) {
+        e.preventDefault();
+        const d = getTouchDist(e.touches[0], e.touches[1]);
+        const factor = d / touchStartDist;
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const panDX = midX - touchStartMidX;
+        const panDY = midY - touchStartMidY;
+        // Zoom around focal point + pan by midpoint delta
+        this._scale = touchStartScale * factor;
+        this._offsetX = touchFocalX - (touchFocalX - touchStartOffsetX) * factor + panDX;
+        this._offsetY = touchFocalY - (touchFocalY - touchStartOffsetY) * factor + panDY;
+        this.render();
+        eventTarget.dispatchEvent(new CustomEvent('transform-change'));
+      }
+    }, { passive: false });
+
+    eventTarget.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) {
+        touchPanActive = false;
+      }
+    }, { passive: true });
   }
 
   get isPanningNow(): boolean {
