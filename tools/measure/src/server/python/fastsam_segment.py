@@ -207,23 +207,61 @@ def remove_zigzag(contour, perimeter):
 MIN_CONTOUR_POINTS = 6
 
 
+def opencv_only_detect(image_bgr, infer_h, infer_w, has_roi):
+    """Pure OpenCV contour detection used when ultralytics/FastSAM is unavailable.
+
+    Tries two strategies:
+      1. Fixed threshold at 90 (works for dark objects on light backgrounds).
+      2. Otsu threshold (adaptive, works for varying lighting).
+    Returns the best contour array or None.
+    """
+    import cv2
+
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    min_ratio = 0.05 if has_roi else 0.10
+
+    for flags in [cv2.THRESH_BINARY_INV, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU]:
+        thresh_val = 90 if flags == cv2.THRESH_BINARY_INV else 0
+        _, thresh = cv2.threshold(gray, thresh_val, 255, flags)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 20))
+        closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        ctrs, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if ctrs:
+            largest = max(ctrs, key=cv2.contourArea)
+            ratio = cv2.contourArea(largest) / float(infer_h * infer_w)
+            if min_ratio <= ratio <= 0.90:
+                return largest
+
+    return None
+
+
 def main():
     args = parse_args()
 
-    # --- Try to import required libraries ---
+    # --- cv2 + numpy are required ---
     try:
         import cv2
         import numpy as np
-        from ultralytics import FastSAM
     except ImportError:
         print(json.dumps({"error": "fastsam_unavailable"}))
         sys.exit(0)
 
+    # --- ultralytics is optional; fall back to pure OpenCV if missing ---
+    FASTSAM_AVAILABLE = False
+    FastSAM = None
+    try:
+        from ultralytics import FastSAM as _FastSAM  # type: ignore
+        FastSAM = _FastSAM
+        FASTSAM_AVAILABLE = True
+    except ImportError:
+        pass
+
     # --- Resolve model path (auto-download if needed) ---
-    model_path = resolve_model_path(args.model)
-    if model_path is None:
-        print(json.dumps({"error": "fastsam_unavailable"}))
-        sys.exit(0)
+    model_path = None
+    if FASTSAM_AVAILABLE:
+        model_path = resolve_model_path(args.model)
+        if model_path is None:
+            FASTSAM_AVAILABLE = False  # model absent — use OpenCV fallback
 
     # --- Load image ---
     try:
@@ -259,6 +297,42 @@ def main():
 
     infer_h, infer_w = image_bgr.shape[:2]
     image_size = {"width": full_w, "height": full_h}
+
+    # --- OpenCV-only path (when ultralytics/FastSAM is unavailable) ---
+    if not FASTSAM_AVAILABLE:
+        best_ctr = opencv_only_detect(image_bgr, infer_h, infer_w, roi is not None)
+        if best_ctr is None:
+            print(json.dumps({"contours": [], "image_size": image_size}))
+            sys.exit(0)
+
+        peri = cv2.arcLength(best_ctr, closed=True)
+        eps = 0.003 * peri
+        simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
+        simplified = remove_spikes(simplified, peri)
+        peri2 = cv2.arcLength(simplified, closed=True)
+        simplified = remove_zigzag(simplified, peri2)
+
+        hull_points = [
+            [int(p[0][0]) + x_offset, int(p[0][1]) + y_offset]
+            for p in simplified
+        ]
+
+        if len(hull_points) < MIN_CONTOUR_POINTS:
+            print(json.dumps({"contours": [], "image_size": image_size}))
+            sys.exit(0)
+
+        output = {
+            "contours": [
+                {
+                    "contour_px": hull_points,
+                    "confidence": 0.75,
+                    "area_px": float(cv2.contourArea(best_ctr)),
+                }
+            ],
+            "image_size": image_size,
+        }
+        print(json.dumps(output))
+        sys.exit(0)
 
     # --- Run FastSAM inference (CPU only) ---
     try:
