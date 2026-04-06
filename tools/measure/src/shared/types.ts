@@ -190,6 +190,62 @@ export interface QualityReport {
   flagged_for_review: boolean;
 }
 
+// ── Video analysis ──
+
+export type VideoJobStatus = 'queued' | 'extracting' | 'analyzing' | 'searching' | 'done' | 'error';
+
+export interface ObjectIdentification {
+  object_type: 'car' | 'mechanical_part' | 'electronics' | 'tool' | 'appliance' | 'furniture' | 'other';
+  common_name: string;
+  model_number: string | null;
+  manufacturer: string | null;
+  description: string;
+  estimated_size_class: 'tiny' | 'small' | 'medium' | 'large' | 'vehicle';
+}
+
+export interface ExtractedFeature {
+  id: string;
+  feature_name: string;
+  feature_type: 'dimension' | 'hole' | 'slot' | 'connector' | 'thread' | 'radius' | 'angle' | 'other';
+  view: 'top' | 'front' | 'side' | 'back' | 'close-up' | 'unknown';
+  value_mm: number | null;
+  value_unit: 'mm' | 'cm' | 'm' | 'inch' | null;
+  confidence: 'high' | 'medium' | 'low';
+  notes: string;
+  source: 'gemini_vision' | 'web_search';
+}
+
+export interface VideoAnalysisResult {
+  object: ObjectIdentification;
+  features: ExtractedFeature[];
+  overall_confidence: 'high' | 'medium' | 'low';
+  feature_count: number;
+  modelling_ready: boolean;
+}
+
+export interface VideoJob {
+  id: string;
+  status: VideoJobStatus;
+  video_filename: string;
+  original_name: string;
+  frame_count: number;
+  object_type: string | null;
+  object_description: string | null;
+  features_json: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── SSE event types for video analysis ──
+export type VideoAnalysisSSEEvent =
+  | { type: 'status'; status: VideoJobStatus; message: string }
+  | { type: 'frames'; frame_count: number }
+  | { type: 'object'; object: ObjectIdentification }
+  | { type: 'features'; features: ExtractedFeature[] }
+  | { type: 'done'; result: VideoAnalysisResult }
+  | { type: 'error'; message: string };
+
 // ── Gemini key pool ──
 export interface ApiKeyStats {
   suffix: string;

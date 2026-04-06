@@ -167,4 +167,24 @@ const MIGRATIONS = [
       );
     `,
   },
+  {
+    name: '005_video_analysis_jobs',
+    sql: `
+      -- Video analysis jobs
+      CREATE TABLE video_jobs (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'queued',
+        video_filename TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        frame_count INTEGER NOT NULL DEFAULT 0,
+        object_type TEXT,
+        object_description TEXT,
+        features_json TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_video_jobs_created ON video_jobs(created_at);
+    `,
+  },
 ];

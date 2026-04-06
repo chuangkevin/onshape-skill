@@ -10,11 +10,12 @@ RUN npx vite build
 # ---------- runtime stage ----------
 FROM node:22-bookworm-slim
 
-# Python 3 + OpenCV headless + numpy only (no PyTorch/ultralytics)
+# Python 3 + OpenCV headless + ffmpeg (for video frame extraction)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         python3 python3-pip \
-        libgl1 libglib2.0-0 && \
+        libgl1 libglib2.0-0 \
+        ffmpeg && \
     pip3 install --no-cache-dir --break-system-packages \
         opencv-python-headless \
         numpy && \
@@ -35,8 +36,8 @@ COPY --from=builder /app/dist ./dist
 COPY src/server ./src/server
 COPY src/shared ./src/shared
 
-# Persistent data lives in a volume
-RUN mkdir -p /app/data
+# Persistent data lives in a volume (includes DB, uploads, frames, videos)
+RUN mkdir -p /app/data/frames /app/data/videos
 
 EXPOSE 6123
 

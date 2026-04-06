@@ -1,0 +1,23 @@
+# Caddy reverse proxy for onshape.sisihome.org
+# Target server: 100.79.242.43 (desktop VM)
+# App runs on port 6123
+
+onshape.sisihome.org {
+    reverse_proxy 100.79.242.43:6123
+
+    # Enable compression
+    encode gzip
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+
+    # Access logging
+    log {
+        output stdout
+        format console
+    }
+}

@@ -50,6 +50,14 @@ jobs:
           ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_SERVER_IP}" "mkdir -p \"${DEPLOY_PATH}\""
           scp -i ~/.ssh/deploy_key tools/measure/docker-compose.yml "${DEPLOY_USER}@${DEPLOY_SERVER_IP}:${DEPLOY_PATH}/docker-compose.yml"
 
+      - name: Sync Caddyfile to server
+        env:
+          DEPLOY_SERVER_IP: ${{ secrets.DEPLOY_SERVER_IP }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          scp -i ~/.ssh/deploy_key tools/measure/Caddyfile "${DEPLOY_USER}@${DEPLOY_SERVER_IP}:${DEPLOY_PATH}/Caddyfile"
+
       - name: Write .env to server
         env:
           DEPLOY_SERVER_IP: ${{ secrets.DEPLOY_SERVER_IP }}
@@ -113,6 +121,15 @@ jobs:
             echo "Starting updated containers..."
             docker compose -f docker-compose.yml up -d --force-recreate
 
+            echo "Reloading Caddy config..."
+            if command -v caddy >/dev/null 2>&1; then
+              caddy reload --config "'"${DEPLOY_PATH}"'/Caddyfile" || true
+            elif docker ps --format "{{.Names}}" | grep -q caddy; then
+              docker exec $(docker ps --filter "name=caddy" --format "{{.ID}}" | head -1) caddy reload --config /etc/caddy/Caddyfile || true
+            else
+              echo "Caddy not found, skipping reload"
+            fi
+
             echo "Cleaning up old images..."
             docker image prune -af --filter "until=24h" || true
 
@@ -133,8 +150,9 @@ jobs:
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Server**: \`${{ secrets.DEPLOY_SERVER_IP }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server**: \`${{ secrets.DEPLOY_SERVER_IP }}\` (100.79.242.43)" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: \`${{ env.DOCKERHUB_USERNAME }}/onshape-measure:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "- **Port**: 6123" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Deployed at: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

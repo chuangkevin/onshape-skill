@@ -14,10 +14,11 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "baseUrl": ".",
+    "jsx": "react-jsx",
     "paths": {
       "@shared/*": ["./src/shared/*"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist", "tests"]
 }
