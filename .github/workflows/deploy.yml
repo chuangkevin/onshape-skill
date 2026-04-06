@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKERHUB_USERNAME: kevin950805
-  DEPLOY_PATH: /home/kevin/DockerCompose/onshape-skill
-  DEPLOY_SERVER: 100.79.242.43   # homedocker VM (Tailscale)
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+  DEPLOY_SERVER: ${{ secrets.DEPLOY_SERVER }}
   DEPLOY_USER: kevin
 
 jobs:
@@ -57,7 +57,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_SERVER }} << 'ENDSSH'
             set -e
-            DEPLOY_PATH="/home/kevin/DockerCompose/onshape-skill"
+            DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
 
             retry_pull() {
               local max_attempts=3
