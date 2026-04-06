@@ -1,8 +1,6 @@
 services:
   photo-measure:
     image: kevin950805/onshape-measure:latest
-    env_file:
-      - .env
     ports:
       - "6123:6123"
     volumes:
