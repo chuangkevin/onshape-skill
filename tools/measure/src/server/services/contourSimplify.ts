@@ -53,8 +53,8 @@ function douglasPeucker(pts: Pt[], epsilon: number): Pt[] {
   return [first, last];
 }
 
-/** Simplify to target 20-40 points using binary search on epsilon */
-function simplifyToTarget(pts: Pt[], minPts = 20, maxPts = 40): Pt[] {
+/** Simplify to target 10-16 points using binary search on epsilon */
+function simplifyToTarget(pts: Pt[], minPts = 10, maxPts = 16): Pt[] {
   if (pts.length <= maxPts) return pts;
 
   const xs = pts.map(p => p.x);
@@ -195,8 +195,8 @@ export function simplifyContour(
     height: Math.max(...ys) - Math.min(...ys),
   };
 
-  // Simplify
-  const simplified = simplifyToTarget(contour_mm, 20, 40);
+  // Simplify to a small number of control points suitable for spline CAD generation
+  const simplified = simplifyToTarget(contour_mm, 10, 16);
 
   // Detect tabs
   const tabs = detectTabs(contour_mm, bbox); // Use full resolution for tab detection

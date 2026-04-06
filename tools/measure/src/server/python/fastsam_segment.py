@@ -306,9 +306,8 @@ def main():
             sys.exit(0)
 
         peri = cv2.arcLength(best_ctr, closed=True)
-        # Use tighter epsilon (0.001) for clean threshold contours — avoids over-simplification.
-        # Skip remove_spikes / remove_zigzag: those helpers target noisy FastSAM masks.
-        eps = 0.001 * peri
+        # Larger epsilon for OpenCV-only path: fewer, smoother points for CAD use.
+        eps = 0.010 * peri
         simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
 
         hull_points = [
@@ -450,7 +449,7 @@ def main():
 
             # best_ctr is already set above (threshold or FastSAM fallback path)
             peri = cv2.arcLength(best_ctr, closed=True)
-            eps = 0.003 * peri  # 0.3%: preserves concave features like bottom brackets
+            eps = 0.010 * peri  # 1.0%: larger epsilon = fewer points, smoother CAD contour
             simplified = cv2.approxPolyDP(best_ctr, eps, closed=True)
 
             # Post-processing: remove spike artifacts + zigzag (ruler contamination)
@@ -514,7 +513,7 @@ def main():
     # --- Simplify polygon ---
     try:
         perimeter = cv2.arcLength(largest_contour, closed=True)
-        epsilon = 0.002 * perimeter
+        epsilon = 0.010 * perimeter  # 1.0%: fewer, cleaner points for CAD use
         simplified = cv2.approxPolyDP(largest_contour, epsilon, closed=True)
         points = [
             [int(pt[0][0]) + x_offset, int(pt[0][1]) + y_offset]

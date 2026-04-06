@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ function smoothContour(
 }
 
 /** Douglas-Peucker simplification for preview (reduce triangulation complexity) */
-function simplifyForPreview(pts: { x: number; y: number }[], maxPts = 60): { x: number; y: number }[] {
+function simplifyForPreview(pts: { x: number; y: number }[], maxPts = 24): { x: number; y: number }[] {
   if (pts.length <= maxPts) return pts;
 
   function perpDist(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
@@ -115,14 +115,19 @@ function buildShape(
 
   if (contour.length === 0) return shape;
 
-  // Smooth (moving avg) then simplify for clean triangulation with no bumps
-  let pts = smoothContour(contour, 5);
-  pts = simplifyForPreview(pts, 60);
+  // Simplify to control points then fit closed CatmullRom spline for smooth surface
+  let pts = simplifyForPreview(contour, 24);
   pts = ensureCCW(pts);
 
-  shape.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) {
-    shape.lineTo(pts[i].x, pts[i].y);
+  // Build a closed CatmullRom spline through the simplified control points,
+  // then sample many smooth points for triangulation (no jagged edges)
+  const splineCtrl = pts.map(p => new THREE.Vector3(p.x, p.y, 0));
+  const splineCurve = new THREE.CatmullRomCurve3(splineCtrl, true /* closed */);
+  const splineSampled = splineCurve.getPoints(120).map(v => ({ x: v.x, y: v.y }));
+
+  shape.moveTo(splineSampled[0].x, splineSampled[0].y);
+  for (let i = 1; i < splineSampled.length; i++) {
+    shape.lineTo(splineSampled[i].x, splineSampled[i].y);
   }
   shape.closePath();
 
@@ -188,7 +193,7 @@ function createMesh(shape: THREE.Shape, thickness: number): THREE.Group {
 
 function fitCameraToObject(
   camera: THREE.PerspectiveCamera,
-  controls: OrbitControls,
+  controls: TrackballControls,
   object: THREE.Object3D,
 ): void {
   const box = new THREE.Box3().setFromObject(object);
@@ -286,25 +291,15 @@ export function createCadPreview(options: CadPreviewOptions): { dispose: () => v
   // ── Camera + Controls ──
   const aspect = container.clientWidth / container.clientHeight || 1;
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV, aspect, CAMERA_NEAR, CAMERA_FAR);
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-  controls.enablePan = true;
-  // No polar/azimuth angle limits — allow free 360° orbit in all directions
-  controls.minPolarAngle = 0;
-  controls.maxPolarAngle = Math.PI;
-  controls.minAzimuthAngle = -Infinity;
-  controls.maxAzimuthAngle = Infinity;
-  controls.mouseButtons = {
-    LEFT: THREE.MOUSE.ROTATE,
-    MIDDLE: THREE.MOUSE.DOLLY,
-    RIGHT: THREE.MOUSE.PAN,
-  };
-  // Explicit touch bindings: one finger = rotate, two fingers = dolly+pan
-  controls.touches = {
-    ONE: THREE.TOUCH.ROTATE,
-    TWO: THREE.TOUCH.DOLLY_PAN,
-  };
+  // TrackballControls: true spherical orbit with no up-vector constraint
+  // Drag any direction → camera rotates freely (no gimbal lock, no polar lock)
+  const controls = new TrackballControls(camera, renderer.domElement);
+  controls.rotateSpeed = 2.0;
+  controls.zoomSpeed = 1.2;
+  controls.panSpeed = 0.8;
+  controls.staticMoving = false;
+  controls.dynamicDampingFactor = 0.15;
+  controls.keys = ['KeyA', 'KeyS', 'KeyD'];
 
   // ── Model ──
   const shape = buildShape(contour_mm, features);
@@ -337,6 +332,7 @@ export function createCadPreview(options: CadPreviewOptions): { dispose: () => v
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    controls.handleResize();
   }
 
   const resizeObserver = new ResizeObserver(onResize);

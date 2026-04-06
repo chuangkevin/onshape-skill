@@ -88,7 +88,7 @@ function generateFallbackFS(data: any): string {
   const cx = geo.boundingBox.x + geo.boundingBox.width / 2;
   const cy = geo.boundingBox.y + geo.boundingBox.height / 2;
 
-  const polyPoints = pts.map(p =>
+  const splinePoints = pts.map(p =>
     `            vector(${(p.x - cx).toFixed(2)} * millimeter, ${(p.y - cy).toFixed(2)} * millimeter)`
   ).join(',\n');
 
@@ -103,7 +103,7 @@ export const measuredPart = defineFeature(function(context is Context, id is Id,
         isLength(definition.thickness, { (millimeter) : [1, ${thickness}, 50] } as LengthBoundSpec);
     }
     {
-        // Generated from photo measurement (${pts.length} contour points)
+        // Generated from photo measurement (${pts.length} spline control points)
         // Bounding box: ${geo.boundingBox.width.toFixed(1)} x ${geo.boundingBox.height.toFixed(1)} mm
         var thickness = definition.thickness;
 
@@ -111,11 +111,12 @@ export const measuredPart = defineFeature(function(context is Context, id is Id,
             "sketchPlane" : plane(vector(0, 0, 0) * meter, vector(0, 0, 1))
         });
 
-        // Main contour
-        skPolyline(sketch1, "contour", {
+        // Main contour — smooth fitted spline through measured points
+        skFitSpline(sketch1, "contour", {
             "points" : [
-${polyPoints}
-            ]
+${splinePoints}
+            ],
+            "closed" : true
         });
 ${geo.holes.map((h, i) => `
         skCircle(sketch1, "hole${i}", {
@@ -156,7 +157,7 @@ Simplified geometry analysis:
 - Simplified contour: ${geo.simplified_points_mm.length} points (from ${contour.length})
 
 Use skRectangle for the main body and each tab. Use skCircle for holes.
-Only use skPolyline if the shape is truly irregular (not rectangular with tabs).`;
+For truly irregular shapes use skFitSpline (closed:true) — NOT skPolyline.`;
   }
 
   const prompt = `You are an Onshape FeatureScript expert. Generate production-ready FeatureScript code.
@@ -170,7 +171,7 @@ KEY RULES:
 1. Start with: FeatureScript 2909; import(path : "onshape/std/common.fs", version : "2909.0");
 2. Center geometry at origin (0,0). Use "* millimeter" for all dimensions.
 3. Use precondition with isLength() for thickness parameter with LengthBoundSpec.
-4. Prefer skRectangle for rectangular body + tabs. Use skPolyline ONLY for truly irregular shapes.
+4. Prefer skRectangle for rectangular body + tabs. Use skFitSpline (with "closed":true) for truly irregular shapes — NEVER skPolyline (produces jagged edges).
 5. Add skCircle for each hole (M2 hole = 1.25mm radius).
 6. Use opExtrude with BoundingType.BLIND for 3D.
 7. Use helper functions (like addTab) for repeated features.
