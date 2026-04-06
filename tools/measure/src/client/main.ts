@@ -390,7 +390,7 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
   const updateProgress = (data: any) => {
     if (currentMode !== 'wizard') return;
     const statusIcons: Record<string, string> = { running: '⏳', done: '✅', error: '❌' };
-    const stepNames: Record<string, string> = { ruler: '尺規偵測', contour: '輪廓偵測', labels: '標籤辨識' };
+    const stepNames: Record<string, string> = { ruler: '尺規偵測', 'vehicle-specs': '車型尺寸', contour: '輪廓偵測', labels: '標籤辨識' };
 
     // Build progress HTML
     let html = '<div style="text-align:left;display:inline-block;">';
@@ -444,6 +444,20 @@ function startAutoAnalysis(projectId: number, photoId: number): void {
     }
     if (data.step === 'labels' && data.status === 'done') {
       autoAnalysisResults = { ...autoAnalysisResults, labels: data.result };
+    }
+
+    if (data.step === 'vehicle-specs' && data.status === 'done') {
+      autoAnalysisResults = { ...autoAnalysisResults, vehicleSpecs: data.result };
+      // Auto-set scale from vehicle official dimensions when no physical ruler was found
+      if (data.result?.found && data.result?.synthetic_ruler) {
+        const r = data.result.synthetic_ruler;
+        store.setScale({
+          pointA_px: { x: r.point_a.px_x, y: r.point_a.px_y },
+          pointB_px: { x: r.point_b.px_x, y: r.point_b.px_y },
+          distance_mm: r.distance_mm,
+          px_per_mm: r.px_per_mm,
+        });
+      }
     }
 
     if (data.step === 'complete' && data.status === 'done') {
@@ -1343,10 +1357,23 @@ function updateWizard(): void {
             <button type="button" class="tool-btn" id="wizManualScale">手動校準</button>
           </div>`;
       } else {
-        bodyHtml = `
-          <p>未偵測到尺規，請手動校準比例尺</p>
-          <p style="color:#8b949e;">在照片中的尺規上點擊兩個刻度點</p>`;
-        activateTool('scale', true);
+        const vs = autoAnalysisResults?.vehicleSpecs;
+        if (vs?.found && vs?.synthetic_ruler) {
+          const v = vs.vehicle;
+          bodyHtml = `
+            <p>車型識別：<strong>${v.year ? v.year + ' ' : ''}${v.make} ${v.model}${v.variant ? ' ' + v.variant : ''}</strong></p>
+            <p>官方尺寸（${vs.synthetic_ruler.point_a.label.includes('front') ? '車長' : '車寬'}）：<strong>${vs.synthetic_ruler.distance_mm} mm</strong></p>
+            <p>比例尺：<strong>${vs.px_per_mm.toFixed(2)} px/mm</strong></p>
+            <div style="margin-top:12px;">
+              <button type="button" class="tool-btn primary" id="wizConfirmScale">確認使用</button>
+              <button type="button" class="tool-btn" id="wizManualScale">手動校準</button>
+            </div>`;
+        } else {
+          bodyHtml = `
+            <p>未偵測到尺規，請手動校準比例尺</p>
+            <p style="color:#8b949e;">在照片中的尺規上點擊兩個刻度點</p>`;
+          activateTool('scale', true);
+        }
       }
     }
   } else if (wizardStep === 4) {

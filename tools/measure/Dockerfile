@@ -11,17 +11,19 @@ RUN npx vite build
 FROM node:22-bookworm-slim
 
 # Python 3 + OpenCV headless + ffmpeg (for video frame extraction)
+# Use a venv to avoid Debian's externally-managed-environment restrictions
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 python3-pip \
+        python3 python3-pip python3-venv \
         libgl1 libglib2.0-0 \
         ffmpeg && \
-    pip3 install --no-cache-dir --break-system-packages \
+    python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir \
         opencv-python-headless \
         numpy && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHON_PATH=/usr/bin/python3
+ENV PYTHON_PATH=/opt/venv/bin/python3
 
 WORKDIR /app
 

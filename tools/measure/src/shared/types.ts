@@ -246,6 +246,25 @@ export type VideoAnalysisSSEEvent =
   | { type: 'done'; result: VideoAnalysisResult }
   | { type: 'error'; message: string };
 
+// ── Vehicle identification ──
+export interface VehicleIdentification {
+  found: true;
+  make: string;
+  model: string;
+  year?: number;
+  variant?: string;
+  view_angle: 'side' | 'front' | 'rear' | 'top' | 'three_quarter' | 'unknown';
+}
+
+export interface VehicleDimensions {
+  length_mm: number;
+  width_mm: number;
+  height_mm: number;
+  wheelbase_mm?: number;
+  front_track_mm?: number;
+  rear_track_mm?: number;
+}
+
 // ── Gemini key pool ──
 export interface ApiKeyStats {
   suffix: string;

@@ -6,14 +6,15 @@ import type { Response } from 'express';
 import { getDb } from '../db.js';
 import { detectRuler, detectObjectBBox } from './ruler.js';
 import { detectContourWithFastSAM } from './contour.js';
-import { extractLabels } from './search.js';
+import { extractLabels, identifyVehicle, searchVehicleDimensions } from './search.js';
+import type { VehicleIdentification, VehicleDimensions } from '@shared/types.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WEB_CALIBRATE_SCRIPT = resolve(__dirname, '../python/web_calibrate.py');
 const IS_WINDOWS = process.platform === 'win32';
 
-type StepId = 'ruler' | 'bbox' | 'contour' | 'labels' | 'complete';
+type StepId = 'ruler' | 'bbox' | 'contour' | 'labels' | 'vehicle-specs' | 'complete';
 type StepStatus = 'running' | 'done' | 'error';
 
 function emit(res: Response, step: StepId, status: StepStatus, result?: unknown): void {
@@ -277,6 +278,71 @@ function triggerWebCalibration(
   });
 }
 
+// ── Vehicle scale computation ──────────────────────────────────────────────
+
+/**
+ * Derive px_per_mm from known vehicle dimensions and the detected bbox.
+ * Returns a synthetic ruler-compatible result, or null if bbox is unavailable.
+ */
+function computeVehicleScale(
+  vehicle: VehicleIdentification,
+  dims: VehicleDimensions,
+  bbox: { found?: boolean; x?: number; y?: number; width?: number; height?: number } | null,
+): {
+  px_per_mm: number;
+  synthetic_ruler: {
+    found: true;
+    point_a: { px_x: number; px_y: number; label: string };
+    point_b: { px_x: number; px_y: number; label: string };
+    distance_mm: number;
+    px_per_mm: number;
+    source: 'vehicle-specs';
+  };
+} | null {
+  if (!bbox?.found || !bbox.width || !bbox.height || !bbox.x == null || !bbox.y == null) return null;
+
+  // Choose reference dimension based on camera angle
+  let referenceMm: number;
+  let labelA: string;
+  let labelB: string;
+
+  switch (vehicle.view_angle) {
+    case 'front':
+    case 'rear':
+      referenceMm = dims.width_mm;
+      labelA = `${vehicle.make} ${vehicle.model} left`;
+      labelB = 'right';
+      break;
+    case 'top':
+      referenceMm = dims.length_mm;
+      labelA = `${vehicle.make} ${vehicle.model} front`;
+      labelB = 'rear';
+      break;
+    case 'side':
+    case 'three_quarter':
+    default:
+      referenceMm = dims.length_mm;
+      labelA = `${vehicle.make} ${vehicle.model} front`;
+      labelB = 'rear';
+  }
+
+  const pxSpan = bbox.width!;
+  const midY = Math.round(bbox.y! + bbox.height! / 2);
+  const px_per_mm = pxSpan / referenceMm;
+
+  return {
+    px_per_mm,
+    synthetic_ruler: {
+      found: true,
+      point_a: { px_x: bbox.x!, px_y: midY, label: labelA },
+      point_b: { px_x: bbox.x! + bbox.width!, px_y: midY, label: labelB },
+      distance_mm: referenceMm,
+      px_per_mm,
+      source: 'vehicle-specs',
+    },
+  };
+}
+
 export async function runAutoAnalysis(
   res: Response,
   projectId: number,
@@ -314,6 +380,48 @@ export async function runAutoAnalysis(
         .then((r) => { emit(res, 'labels', 'done', r); return r; })
         .catch((e) => { emit(res, 'labels', 'error', { error: e.message }); return null; }),
     ]);
+
+    // Phase 1.5: Vehicle identification + official dimension lookup
+    // Only runs when no physical ruler was found in the photo.
+    // If a vehicle is identified, dimensions are REQUIRED — failure throws (no fallback).
+    let vehicleSpecsResult: any = null;
+    if (!rulerResult?.found) {
+      emit(res, 'vehicle-specs', 'running');
+      try {
+        const vehicleId = await identifyVehicle(imagePath, projectId);
+        if (vehicleId.found === false) {
+          emit(res, 'vehicle-specs', 'done', { found: false });
+        } else {
+          // Vehicle detected — dimensions are mandatory; throws on failure
+          const dims = await searchVehicleDimensions(vehicleId, projectId);
+          const scale = computeVehicleScale(vehicleId, dims, bboxResult);
+          if (!scale) {
+            throw new Error(
+              `Vehicle "${vehicleId.make} ${vehicleId.model}" identified but bbox unavailable — cannot compute px/mm scale`,
+            );
+          }
+          vehicleSpecsResult = {
+            found: true,
+            vehicle: vehicleId,
+            dims,
+            px_per_mm: scale.px_per_mm,
+            synthetic_ruler: scale.synthetic_ruler,
+          };
+          emit(res, 'vehicle-specs', 'done', vehicleSpecsResult);
+          console.log(
+            `[autoAnalyze] Vehicle specs: ${vehicleId.make} ${vehicleId.model} → ` +
+            `L=${dims.length_mm}mm W=${dims.width_mm}mm H=${dims.height_mm}mm, ` +
+            `px/mm=${scale.px_per_mm.toFixed(3)}`,
+          );
+        }
+      } catch (e: any) {
+        emit(res, 'vehicle-specs', 'error', { error: e.message });
+        throw e;
+      }
+    } else {
+      // Ruler found — skip vehicle identification
+      emit(res, 'vehicle-specs', 'done', { found: false, skipped: true });
+    }
 
     // Phase 2: Two-layer fallback contour detection
     // Layer 0: FastSAM (fast, local, pixel-accurate) with optional bbox ROI
@@ -388,7 +496,13 @@ export async function runAutoAnalysis(
     }
 
     // Store results
-    const combined = { ruler: rulerResult, bbox: bboxResult, contour: contourResult, labels: labelResult };
+    const combined = {
+      ruler: rulerResult,
+      bbox: bboxResult,
+      contour: contourResult,
+      labels: labelResult,
+      vehicleSpecs: vehicleSpecsResult,
+    };
     db.prepare(`
       INSERT INTO analysis_results (project_id, photo_id, result_type, raw_response, parsed_data)
       VALUES (?, ?, 'auto_analyze', ?, ?)
