@@ -127,6 +127,8 @@
     .landing-content { max-width:800px; width:100%; padding:32px; }
     .landing-content h2 { font-size:24px; margin-bottom:20px; text-align:center; }
     .landing-actions { display:flex; justify-content:center; margin-bottom:24px; }
+    .landing-settings-btn { position:absolute; top:16px; right:16px; padding:8px 14px; background:transparent; border:1px solid #30363d; color:#8b949e; border-radius:6px; font-size:14px; cursor:pointer; z-index:51; }
+    .landing-settings-btn:hover { background:#21262d; color:#c9d1d9; }
     .landing-new-btn { padding:12px 24px; background:#238636; border:none; color:#fff; border-radius:8px; font-size:16px; cursor:pointer; }
     .landing-new-btn:hover { background:#2ea043; }
     .project-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px; }
@@ -151,10 +153,10 @@
     .settings-body { padding:20px; overflow-y:auto; flex:1; }
     .settings-section { margin-bottom:20px; }
     .settings-section h3 { font-size:14px; color:#8b949e; margin-bottom:12px; letter-spacing:0.3px; }
-    .key-add-form { display:flex; gap:8px; margin-bottom:12px; }
-    .key-add-form input { flex:1; padding:8px 12px; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; font-size:13px; font-family:monospace; }
-    .key-add-form input::placeholder { color:#484f58; }
-    .key-add-form button { padding:8px 16px; background:#238636; border:none; color:#fff; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
+    .key-add-form { display:flex; flex-direction:column; gap:8px; margin-bottom:12px; }
+    .key-add-form textarea { width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; font-size:13px; font-family:monospace; resize:vertical; min-height:72px; box-sizing:border-box; }
+    .key-add-form textarea::placeholder { color:#484f58; }
+    .key-add-form button { align-self:flex-end; padding:8px 20px; background:#238636; border:none; color:#fff; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
     .key-add-form button:hover { background:#2ea043; }
     .key-list { display:flex; flex-direction:column; gap:6px; }
     .key-item { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; font-size:13px; }
@@ -399,6 +401,7 @@
   </div>
 
   <div id="projectLanding" class="project-landing">
+    <button type="button" class="landing-settings-btn" id="landingSettingsBtn">&#9881; 設定</button>
     <div class="landing-content">
       <h2>你的量測專案</h2>
       <div class="landing-actions">
@@ -583,7 +586,7 @@
         <div class="settings-section">
           <h3>GEMINI API KEYS</h3>
           <div class="key-add-form">
-            <input type="text" id="newKeyInput" placeholder="貼上 API Key（例：AIzaSy...）" />
+            <textarea id="newKeyInput" placeholder="貼上 API Key，每行一個（例：AIzaSy...）&#10;支援多行批次匯入"></textarea>
             <button type="button" id="addKeyBtn">新增</button>
           </div>
           <div class="key-list" id="keyList">

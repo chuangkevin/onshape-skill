@@ -51,9 +51,10 @@ const previewContainer = document.getElementById('previewContainer') as HTMLDivE
 
 // ── Settings DOM Elements ──
 const settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
+const landingSettingsBtn = document.getElementById('landingSettingsBtn') as HTMLButtonElement;
 const settingsOverlay = document.getElementById('settingsOverlay') as HTMLDivElement;
 const settingsClose = document.getElementById('settingsClose') as HTMLButtonElement;
-const newKeyInput = document.getElementById('newKeyInput') as HTMLInputElement;
+const newKeyInput = document.getElementById('newKeyInput') as HTMLTextAreaElement;
 const addKeyBtn = document.getElementById('addKeyBtn') as HTMLButtonElement;
 const keyList = document.getElementById('keyList') as HTMLDivElement;
 
@@ -1612,11 +1613,14 @@ async function renderKeyList(): Promise<void> {
   }
 }
 
+function openSettings(): void {
+  settingsOverlay.classList.remove('hidden');
+  renderKeyList();
+}
+
 function setupSettingsEvents(): void {
-  settingsBtn.addEventListener('click', () => {
-    settingsOverlay.classList.remove('hidden');
-    renderKeyList();
-  });
+  settingsBtn.addEventListener('click', openSettings);
+  landingSettingsBtn.addEventListener('click', openSettings);
 
   settingsClose.addEventListener('click', () => {
     settingsOverlay.classList.add('hidden');
@@ -1627,26 +1631,33 @@ function setupSettingsEvents(): void {
   });
 
   addKeyBtn.addEventListener('click', async () => {
-    const key = newKeyInput.value.trim();
-    if (!key) return;
+    const keys = newKeyInput.value
+      .split('\n')
+      .map(k => k.trim())
+      .filter(k => k.length > 0);
+    if (keys.length === 0) return;
     addKeyBtn.textContent = '新增中…';
     addKeyBtn.setAttribute('disabled', '');
+    let added = 0;
+    const errors: string[] = [];
     try {
-      const result = await api.addApiKey(key);
-      if (result.added) {
-        newKeyInput.value = '';
-        await renderKeyList();
+      for (const key of keys) {
+        try {
+          const result = await api.addApiKey(key);
+          if (result.added) added++;
+        } catch (err: unknown) {
+          errors.push(key.slice(-4) + ': ' + (err instanceof Error ? err.message : '未知錯誤'));
+        }
       }
-    } catch (err: unknown) {
-      alert('新增失敗：' + (err instanceof Error ? err.message : '未知錯誤'));
+      newKeyInput.value = '';
+      await renderKeyList();
+      if (errors.length > 0) {
+        alert(`已新增 ${added} 個，以下失敗：\n` + errors.join('\n'));
+      }
     } finally {
       addKeyBtn.textContent = '新增';
       addKeyBtn.removeAttribute('disabled');
     }
-  });
-
-  newKeyInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') addKeyBtn.click();
   });
 
   keyList.addEventListener('click', async (e) => {
