@@ -44,8 +44,30 @@ function ensureCCW(pts: { x: number; y: number }[]): { x: number; y: number }[] 
   return area >= 0 ? pts : [...pts].reverse();
 }
 
+/**
+ * Circular moving-average smoothing to reduce noisy contour points.
+ * window=5 removes high-frequency zigzags while preserving corners.
+ */
+function smoothContour(
+  pts: { x: number; y: number }[],
+  window = 5,
+): { x: number; y: number }[] {
+  const n = pts.length;
+  if (n <= window) return pts;
+  const half = Math.floor(window / 2);
+  return pts.map((_, i) => {
+    let sx = 0, sy = 0;
+    for (let j = -half; j <= half; j++) {
+      const idx = (i + j + n) % n;
+      sx += pts[idx].x;
+      sy += pts[idx].y;
+    }
+    return { x: sx / window, y: sy / window };
+  });
+}
+
 /** Douglas-Peucker simplification for preview (reduce triangulation complexity) */
-function simplifyForPreview(pts: { x: number; y: number }[], maxPts = 30): { x: number; y: number }[] {
+function simplifyForPreview(pts: { x: number; y: number }[], maxPts = 60): { x: number; y: number }[] {
   if (pts.length <= maxPts) return pts;
 
   function perpDist(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
@@ -93,8 +115,9 @@ function buildShape(
 
   if (contour.length === 0) return shape;
 
-  // Simplify + ensure CCW winding for clean triangulation
-  let pts = simplifyForPreview(contour, 30);
+  // Smooth (moving avg) then simplify for clean triangulation with no bumps
+  let pts = smoothContour(contour, 5);
+  pts = simplifyForPreview(pts, 60);
   pts = ensureCCW(pts);
 
   shape.moveTo(pts[0].x, pts[0].y);
@@ -244,6 +267,9 @@ export function createCadPreview(options: CadPreviewOptions): { dispose: () => v
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setClearColor(BACKGROUND_COLOR);
+  // Required for OrbitControls touch events on mobile — prevents browser
+  // scroll/zoom from intercepting pointer events on the canvas.
+  renderer.domElement.style.touchAction = 'none';
   container.appendChild(renderer.domElement);
 
   // ── Scene ──
@@ -264,10 +290,20 @@ export function createCadPreview(options: CadPreviewOptions): { dispose: () => v
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
   controls.enablePan = true;
+  // No polar/azimuth angle limits — allow free 360° orbit in all directions
+  controls.minPolarAngle = 0;
+  controls.maxPolarAngle = Math.PI;
+  controls.minAzimuthAngle = -Infinity;
+  controls.maxAzimuthAngle = Infinity;
   controls.mouseButtons = {
     LEFT: THREE.MOUSE.ROTATE,
     MIDDLE: THREE.MOUSE.DOLLY,
     RIGHT: THREE.MOUSE.PAN,
+  };
+  // Explicit touch bindings: one finger = rotate, two fingers = dolly+pan
+  controls.touches = {
+    ONE: THREE.TOUCH.ROTATE,
+    TWO: THREE.TOUCH.DOLLY_PAN,
   };
 
   // ── Model ──

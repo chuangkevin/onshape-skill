@@ -37,6 +37,87 @@ function emitContourUpdate(
   res.write(`event: contour-update\ndata: ${JSON.stringify({ source, contours })}\n\n`);
 }
 
+// ── Ruler gap bridging ─────────────────────────────────────────────────────
+
+/**
+ * Remove contour points that fall within the ruler's bounding strip, then
+ * optionally add a single interpolated midpoint to make the bridge edge
+ * straight. For a closed polygon this is sufficient — the renderer will
+ * connect the gap endpoints with a clean straight segment.
+ *
+ * @param contour   Array of {x, y} pixel points
+ * @param ruler     detectRuler result (may be null / not found)
+ * @param halfWidth Half-width of the ruler in pixels (default 45 px)
+ */
+function bridgeRulerGap(
+  contour: { x: number; y: number }[],
+  ruler: any,
+  halfWidth = 45,
+): { x: number; y: number }[] {
+  if (!ruler?.found) return contour;
+  const ax: number = ruler.point_a?.px_x;
+  const ay: number = ruler.point_a?.px_y;
+  const bx: number = ruler.point_b?.px_x;
+  const by: number = ruler.point_b?.px_y;
+  if (ax == null || bx == null) return contour;
+
+  const dx = bx - ax, dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return contour;
+
+  // Unit vectors along and perpendicular to the ruler
+  const ux = dx / len, uy = dy / len;
+  const nx = -uy, ny = ux; // perpendicular
+
+  // Extend the ruler region 20 px beyond each endpoint
+  const ext = 20;
+
+  function inRuler(px: number, py: number): boolean {
+    const rx = px - ax, ry = py - ay;
+    const along = rx * ux + ry * uy;
+    const perp = Math.abs(rx * nx + ry * ny);
+    return along >= -ext && along <= len + ext && perp <= halfWidth;
+  }
+
+  const n = contour.length;
+  if (n < 3) return contour;
+
+  const inside = contour.map((p) => inRuler(p.x, p.y));
+  if (!inside.some(Boolean)) return contour;     // ruler doesn't touch contour
+  if (inside.every(Boolean)) return contour;     // degenerate — keep as-is
+
+  // Start iteration from a point that is definitely outside the ruler
+  const startIdx = inside.findIndex((v) => !v);
+  const result: { x: number; y: number }[] = [];
+  let prevOutside = true;
+  let gapEntryPt: { x: number; y: number } | null = null;
+
+  for (let k = 0; k < n; k++) {
+    const i = (startIdx + k) % n;
+    if (!inside[i]) {
+      if (!prevOutside && gapEntryPt) {
+        // Exiting gap: add midpoint bridge for a cleaner straight edge
+        const exitPt = contour[i];
+        result.push({
+          x: Math.round((gapEntryPt.x + exitPt.x) / 2),
+          y: Math.round((gapEntryPt.y + exitPt.y) / 2),
+        });
+        gapEntryPt = null;
+      }
+      result.push(contour[i]);
+      prevOutside = true;
+    } else {
+      if (prevOutside) {
+        // Entering gap: remember the last outside point
+        gapEntryPt = result[result.length - 1] ?? contour[i];
+      }
+      prevOutside = false;
+    }
+  }
+
+  return result.length >= 3 ? result : contour;
+}
+
 /**
  * Quality gate for contour results.
  * Returns false (reject) if:
@@ -276,9 +357,14 @@ export async function runAutoAnalysis(
 
       if (fastSamResult.found && fastSamResult.contours.length > 0) {
         if (isContourQualityOk(fastSamResult.contours, bboxResult, imgW, imgH)) {
-          contourResult = { ...fastSamResult, method: 'fastsam' };
-          console.log(`[autoAnalyze] Contour via FastSAM (${fastSamResult.contours.length} contour(s))`);
-          emitContourUpdate(res, 'fastsam', fastSamResult.contours);
+          // Apply ruler gap bridging: remove contour points occluded by the ruler
+          const bridgedContours = fastSamResult.contours.map((c) => ({
+            ...c,
+            contour_px: bridgeRulerGap(c.contour_px, rulerResult),
+          }));
+          contourResult = { ...fastSamResult, contours: bridgedContours, method: 'fastsam' };
+          console.log(`[autoAnalyze] Contour via FastSAM (${bridgedContours.length} contour(s))`);
+          emitContourUpdate(res, 'fastsam', bridgedContours);
           // Launch Phase 2 web calibration asynchronously (fire-and-forget)
           triggerWebCalibration(res, imagePath, labelResult, projectId);
         } else {

@@ -146,8 +146,8 @@ function getWizardAllowedTools(): string[] | null {
     case 2: return ['select', 'roi'];
     case 3: return ['select', 'scale'];
     case 4: return ['select', 'polyline', 'edit-contour'];
-    case 5: return ['select', 'hole'];
-    case 6: return ['select'];
+    case 5: return null; // 補充特徵: allow all tools
+    case 6: return null; // 匯出: allow all tools
     default: return null;
   }
 }
