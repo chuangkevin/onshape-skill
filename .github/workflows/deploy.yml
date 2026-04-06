@@ -12,6 +12,8 @@ on:
 env:
   DOCKERHUB_USERNAME: kevin950805
   DEPLOY_PATH: /home/kevin/DockerCompose/onshape-skill
+  DEPLOY_SERVER: 100.79.242.43   # homedocker VM (Tailscale)
+  DEPLOY_USER: kevin
 
 jobs:
   deploy:
@@ -33,38 +35,29 @@ jobs:
         run: |
           echo "Testing connection to deployment server..."
           tailscale status
-          ping -c 3 ${{ secrets.DEPLOY_SERVER_IP }}
+          ping -c 3 ${{ env.DEPLOY_SERVER }}
 
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.DEPLOY_SERVER_IP }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ env.DEPLOY_SERVER }} >> ~/.ssh/known_hosts
 
       - name: Sync docker-compose.yml to server
-        env:
-          DEPLOY_SERVER_IP: ${{ secrets.DEPLOY_SERVER_IP }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_SERVER_IP}" "mkdir -p ${DEPLOY_PATH}"
-          scp -i ~/.ssh/deploy_key tools/measure/docker-compose.yml "${DEPLOY_USER}@${DEPLOY_SERVER_IP}:${DEPLOY_PATH}/docker-compose.yml"
+          ssh -i ~/.ssh/deploy_key "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_SERVER }}" "mkdir -p ${{ env.DEPLOY_PATH }}"
+          scp -i ~/.ssh/deploy_key tools/measure/docker-compose.yml "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_SERVER }}:${{ env.DEPLOY_PATH }}/docker-compose.yml"
 
       - name: Sync Caddyfile to server
-        env:
-          DEPLOY_SERVER_IP: ${{ secrets.DEPLOY_SERVER_IP }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          scp -i ~/.ssh/deploy_key tools/measure/Caddyfile "${DEPLOY_USER}@${DEPLOY_SERVER_IP}:${DEPLOY_PATH}/Caddyfile"
+          scp -i ~/.ssh/deploy_key tools/measure/Caddyfile "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_SERVER }}:${{ env.DEPLOY_PATH }}/Caddyfile"
 
       - name: Deploy via SSH
-        env:
-          DEPLOY_SERVER_IP: ${{ secrets.DEPLOY_SERVER_IP }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_SERVER_IP} << 'ENDSSH'
+          ssh -i ~/.ssh/deploy_key ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_SERVER }} << 'ENDSSH'
             set -e
-            DEPLOY_PATH="/home/kevin/onshape-skill-build/tools/measure"
+            DEPLOY_PATH="/home/kevin/DockerCompose/onshape-skill"
 
             retry_pull() {
               local max_attempts=3
@@ -128,7 +121,7 @@ jobs:
         run: |
           echo "Performing health check..."
           sleep 10
-          curl -f http://${{ secrets.DEPLOY_SERVER_IP }}:6123/api/health || exit 1
+          curl -f http://${{ env.DEPLOY_SERVER }}:6123/api/health || exit 1
           echo "Health check passed!"
 
       - name: Deployment Summary
@@ -137,9 +130,9 @@ jobs:
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Server**: \`${{ secrets.DEPLOY_SERVER_IP }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server**: \`${{ env.DEPLOY_SERVER }}\` (homedocker VM)" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: \`${{ env.DOCKERHUB_USERNAME }}/onshape-measure:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Platform**: linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "- **Port**: 6123" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Deployed at: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
