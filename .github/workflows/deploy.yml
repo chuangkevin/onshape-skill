@@ -11,7 +11,7 @@ on:
 
 env:
   DOCKERHUB_USERNAME: kevin950805
-  DEPLOY_PATH: /home/kevin/onshape-skill-build/tools/measure
+  DEPLOY_PATH: /home/kevin/DockerCompose/onshape-skill
 
 jobs:
   deploy:
