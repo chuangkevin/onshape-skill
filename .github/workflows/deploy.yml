@@ -12,7 +12,7 @@ on:
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-  DEPLOY_SERVER: ${{ secrets.DEPLOY_SERVER }}
+  DEPLOY_SERVER: ${{ secrets.DEPLOY_SERVER_IP }}
   DEPLOY_USER: kevin
 
 jobs:
