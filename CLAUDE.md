@@ -42,3 +42,19 @@ onshape-skill/
 ## Tools
 
 - `tools/measure/` — helper for extracting dimensions from reference images
+
+---
+
+## Deployment
+
+### CI/CD (GitHub Actions)
+
+- **`docker-publish.yml`**: Builds and pushes `linux/amd64` image to Docker Hub (`onshape-measure`).
+- **`deploy.yml`**: Deploys to server via Tailscale SSH.
+- **Required Secrets**:
+  - `DEPLOY_USER`, `DEPLOY_SERVER_IP`, `DEPLOY_PATH`, `DEPLOY_SSH_KEY`
+  - `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`
+  - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`
+
+### Cleanup Policy
+- Deployment scripts must clean up both `photo-measure` and `photomeasure` container variants to avoid naming conflicts.

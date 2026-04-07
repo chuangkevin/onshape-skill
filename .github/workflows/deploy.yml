@@ -13,7 +13,7 @@ env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
   DEPLOY_SERVER: ${{ secrets.DEPLOY_SERVER_IP }}
-  DEPLOY_USER: kevin
+  DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
 
 jobs:
   deploy:
@@ -85,8 +85,11 @@ jobs:
 
             retry_pull
 
-            echo "Stopping existing containers..."
+            echo "🛑 Stopping existing containers..."
             docker compose -f docker-compose.yml down --remove-orphans --timeout 30 || true
+
+            echo "🧹 Force removing any leftover containers..."
+            docker rm -f photo-measure photomeasure 2>/dev/null || true
 
             echo "Waiting for port release..."
             for i in 1 2 3 4 5 6; do
@@ -98,7 +101,7 @@ jobs:
               sleep 5
             done
 
-            echo "Starting updated containers..."
+            echo "🚀 Starting updated containers..."
             docker compose -f docker-compose.yml up -d --force-recreate
 
             echo "Reloading Caddy config..."
