@@ -190,7 +190,7 @@ function runCommand(cmd: string, args: string[]): Promise<{ exitCode: number; st
       : args;
 
     const proc = spawn(cmd, safeArgs, {
-      shell: true,
+      shell: IS_WINDOWS, // shell:true on Windows for PATH resolution; on Linux args are passed directly to avoid sh interpreting semicolons in Python -c args
       windowsHide: true,
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
