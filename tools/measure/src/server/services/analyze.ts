@@ -1,16 +1,18 @@
 import { resolve } from 'path';
 import { getDb } from '../db.js';
 import { extractOCRReadings } from './ocr.js';
-import { extractLabels, searchOfficialSpecs } from './search.js';
+import { extractLabels, searchOfficialSpecs, identifyVehicle, searchVehicleDimensions } from './search.js';
 import { detectEdges, deriveROI } from './opencv.js';
 import { evaluateQuality } from './qualityGate.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
-import type { AnalysisResults, OpenCVResult, QualityReport } from '@shared/types.js';
+import type { AnalysisResults, OpenCVResult, QualityReport, VehicleIdentification, VehicleDimensions } from '@shared/types.js';
 
 export interface FullAnalysisResult {
   ai: AnalysisResults;
   opencv: OpenCVResult[];
   quality: QualityReport;
+  vehicle?: VehicleIdentification;
+  vehicle_dimensions?: VehicleDimensions;
 }
 
 /** Run full parallel analysis pipeline for a project */
@@ -70,6 +72,21 @@ export async function runAnalysisPipeline(projectId: number): Promise<FullAnalys
     officialSpecs = await searchOfficialSpecs(labelInfo, projectId);
   }
 
+  // Task 5: Vehicle identification + dimension lookup (v0.7.0)
+  // Runs on the first image; skipped if identification fails or throws.
+  let vehicle: VehicleIdentification | undefined;
+  let vehicle_dimensions: VehicleDimensions | undefined;
+  try {
+    const vehicleResult = await identifyVehicle(imagePaths[0], projectId);
+    if (vehicleResult.found) {
+      vehicle = vehicleResult as VehicleIdentification;
+      vehicle_dimensions = await searchVehicleDimensions(vehicle, projectId);
+      console.log(`[analyze] Vehicle identified: ${vehicle.make} ${vehicle.model}, dims: ${JSON.stringify(vehicle_dimensions)}`);
+    }
+  } catch (e: any) {
+    console.warn('[analyze] Vehicle dimension lookup skipped:', e.message);
+  }
+
   // Build results
   const aiResults: AnalysisResults = {
     ocr_readings: ocrResults,
@@ -90,9 +107,9 @@ export async function runAnalysisPipeline(projectId: number): Promise<FullAnalys
     VALUES (?, 'full_analysis', ?, ?)
   `).run(
     projectId,
-    JSON.stringify({ ai: aiResults, opencv: opencvResults, quality }),
+    JSON.stringify({ ai: aiResults, opencv: opencvResults, quality, vehicle, vehicle_dimensions }),
     JSON.stringify(aiResults),
   );
 
-  return { ai: aiResults, opencv: opencvResults, quality };
+  return { ai: aiResults, opencv: opencvResults, quality, vehicle, vehicle_dimensions };
 }
