@@ -6,6 +6,7 @@ services:
     volumes:
       - measure-data:/app/data
     environment:
+      - TZ=Asia/Taipei
       - NODE_ENV=production
       - PORT=6123
       - PYTHON_PATH=/opt/venv/bin/python3
