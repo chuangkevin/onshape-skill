@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { callGemini, releasePreferredGeminiKey, reservePreferredGeminiKey } from '../geminiClient.js';
+import { callGeminiWithApiKey } from '../geminiClient.js';
+import { getGeminiStepRunner } from '../aiCoreGeminiPool.js';
 import { simplifyContour } from '../services/contourSimplify.js';
 
 const router = Router();
@@ -379,29 +380,28 @@ ${JSON.stringify(measurementData, null, 2)}
 
 Generate the complete FeatureScript code. Output ONLY code, no explanation.`;
 
-  let preferredApiKey: string | undefined;
   try {
-    preferredApiKey = reservePreferredGeminiKey();
-    if (preferredApiKey) {
-      console.log(`[featurescript key] generate-featurescript -> ...${preferredApiKey.slice(-4)}`);
-    }
-
-    const result = await callGemini({
-      prompt,
-      callType: 'featurescript',
-      projectId: measurementData.projectId,
-      preferredApiKey,
+    const runner = getGeminiStepRunner();
+    const result = await runner.runStep({
+      id: 'generate-featurescript',
+      name: 'generate-featurescript',
+      allowSharedFallback: true,
+      run: (apiKey) => callGeminiWithApiKey({
+        apiKey,
+        prompt,
+        callType: 'featurescript',
+        projectId: measurementData.projectId,
+      }),
     });
-    releasePreferredGeminiKey(preferredApiKey);
+    console.warn(`[featurescript step] generate-featurescript -> ...${result.metadata.keyUsed.slice(-4)}${result.metadata.sharedFallbackUsed ? ' (shared)' : ''}`);
 
-    const code = normalizeFeatureScriptCode(result.text);
+    const code = normalizeFeatureScriptCode(result.value.text);
     if (!isValidFeatureScriptCode(code)) {
       throw new Error('Gemini returned invalid FeatureScript format');
     }
 
     res.json({ code, method: 'gemini' });
   } catch (err: any) {
-    releasePreferredGeminiKey(preferredApiKey);
     console.error('FeatureScript generation error (Gemini), using fallback:', err.message);
 
     // Fallback: generate basic FeatureScript without AI

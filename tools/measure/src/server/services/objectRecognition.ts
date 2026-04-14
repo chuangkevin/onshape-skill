@@ -10,7 +10,7 @@
  *  3. searchMissingDimensions() — Gemini + Google Search grounding for unknown dims
  */
 
-import { callGemini } from '../geminiClient.js';
+import { callGemini, callGeminiWithApiKey } from '../geminiClient.js';
 import type {
   ExtractedFeature,
   ObjectIdentification,
@@ -51,7 +51,7 @@ export async function identifyObject(
   framePaths: string[],
   projectId?: number,
   preferredApiKey?: string,
-  avoidApiKeys?: string[],
+  apiKeyOverride?: string,
 ): Promise<ObjectIdentification> {
   // Use at most 5 well-spaced frames for the identification call
   const samplePaths = sampleFrames(framePaths, 5);
@@ -70,14 +70,15 @@ Identify the object and respond with ONLY a JSON object in this exact schema:
 
 Return only valid JSON, no extra text.`;
 
-  const { text } = await callGemini({
+  const request = {
     prompt,
     imagePaths: samplePaths,
     callType: 'video_identify_object',
     projectId,
-    preferredApiKey,
-    avoidApiKeys,
-  });
+  };
+  const { text } = apiKeyOverride
+    ? await callGeminiWithApiKey({ ...request, apiKey: apiKeyOverride })
+    : await callGemini({ ...request, preferredApiKey });
 
   const parsed = parseJson<Partial<ObjectIdentification>>(text, {});
   return {
@@ -100,7 +101,7 @@ export async function extractFeatures(
   framePaths: string[],
   objectInfo: ObjectIdentification,
   projectId?: number,
-  getBatchKeyAssignment?: (batchIndex: number) => { preferredApiKey?: string; avoidApiKeys?: string[]; release?: () => void },
+  getBatchKeyAssignment?: (batchIndex: number) => { preferredApiKey?: string; apiKeyOverride?: string; release?: () => void },
   onBatchComplete?: (features: ExtractedFeature[]) => void,
 ): Promise<ExtractedFeature[]> {
   // Process frames in batches of up to 4 images per Gemini call
@@ -112,7 +113,7 @@ export async function extractFeatures(
     const batchIndex = Math.floor(i / BATCH);
     const assignment = getBatchKeyAssignment?.(batchIndex);
     try {
-      const features = await extractFeaturesFromBatch(batch, objectInfo, projectId, assignment?.preferredApiKey, assignment?.avoidApiKeys);
+      const features = await extractFeaturesBatch(batch, objectInfo, projectId, assignment?.preferredApiKey, assignment?.apiKeyOverride);
       allFeatures.push(...features);
       onBatchComplete?.(mergeFeatures(allFeatures));
     } finally {
@@ -123,12 +124,12 @@ export async function extractFeatures(
   return mergeFeatures(allFeatures);
 }
 
-async function extractFeaturesFromBatch(
+export async function extractFeaturesBatch(
   framePaths: string[],
   objectInfo: ObjectIdentification,
   projectId?: number,
   preferredApiKey?: string,
-  avoidApiKeys?: string[],
+  apiKeyOverride?: string,
 ): Promise<ExtractedFeature[]> {
   const prompt = `You are a precision metrology expert analyzing images of: ${objectInfo.common_name} (${objectInfo.object_type}).
 ${objectInfo.description}
@@ -155,14 +156,15 @@ Rules:
 - If no scale reference is visible, mark confidence as "low"
 - Return only the JSON array, no extra text`;
 
-  const { text } = await callGemini({
+  const request = {
     prompt,
     imagePaths: framePaths,
     callType: 'video_extract_features',
     projectId,
-    preferredApiKey,
-    avoidApiKeys,
-  });
+  };
+  const { text } = apiKeyOverride
+    ? await callGeminiWithApiKey({ ...request, apiKey: apiKeyOverride })
+    : await callGemini({ ...request, preferredApiKey });
 
   const parsed = parseJson<Partial<ExtractedFeature>[]>(text, []);
   return parsed
@@ -191,7 +193,7 @@ export async function searchMissingDimensions(
   objectInfo: ObjectIdentification,
   projectId?: number,
   preferredApiKey?: string,
-  avoidApiKeys?: string[],
+  apiKeyOverride?: string,
 ): Promise<ExtractedFeature[]> {
   const missingCount = features.filter(
     (f) => f.value_mm === null || f.confidence === 'low',
@@ -228,14 +230,15 @@ Respond ONLY with a JSON array:
 
 Return only the JSON array, no extra text.`;
 
-  const { text } = await callGemini({
+  const request = {
     prompt,
     callType: 'video_search_dimensions',
     projectId,
     useGrounding: true,
-    preferredApiKey,
-    avoidApiKeys,
-  });
+  };
+  const { text } = apiKeyOverride
+    ? await callGeminiWithApiKey({ ...request, apiKey: apiKeyOverride })
+    : await callGemini({ ...request, preferredApiKey });
 
   const searchResults = parseJson<Array<{
     feature_name: string;
@@ -306,7 +309,7 @@ function sampleFrames(paths: string[], n: number): string[] {
  * Merge features from multiple batches.
  * Deduplicates by feature_name (case-insensitive), keeping the highest-confidence entry.
  */
-function mergeFeatures(features: ExtractedFeature[]): ExtractedFeature[] {
+export function mergeFeatures(features: ExtractedFeature[]): ExtractedFeature[] {
   const map = new Map<string, ExtractedFeature>();
   const order: Record<string, number> = { high: 3, medium: 2, low: 1 };
 

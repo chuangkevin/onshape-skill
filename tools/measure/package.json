@@ -13,6 +13,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@kevinsisi/ai-core": "git+https://github.com/kevinsisi/ai-core.git#49c72ed",
     "better-sqlite3": "^11.10.0",
     "express": "^4.21.0",
     "multer": "^1.4.5-lts.1",

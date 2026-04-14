@@ -59,6 +59,10 @@ export function getGeminiApiKey(db?: Database.Database, skipKeys?: Set<string>):
   return pickNextKey(keys, skipKeys);
 }
 
+export function getConfiguredGeminiKeys(db?: Database.Database): string[] {
+  return loadKeys(db);
+}
+
 /** Get a key excluding the failed one (for 429 failover) */
 export function getGeminiApiKeyExcluding(failedKey: string, db?: Database.Database): string {
   const keys = loadKeys(db);

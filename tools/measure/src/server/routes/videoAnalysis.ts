@@ -14,13 +14,15 @@ import { join, resolve, dirname } from 'path';
 import { mkdirSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
+import type { RunnableStep, StepExecutionResult } from '@kevinsisi/ai-core';
 
+import { getGeminiStepRunner, planGeminiSteps } from '../aiCoreGeminiPool.js';
 import { getDb } from '../db.js';
-import { releasePreferredGeminiKey, reservePreferredGeminiKey } from '../geminiClient.js';
 import { extractFrames, adoptPhotosAsFrames, cleanupJobFrames, FRAMES_BASE_DIR } from '../services/videoService.js';
 import {
   identifyObject,
-  extractFeatures,
+  extractFeaturesBatch,
+  mergeFeatures,
   searchMissingDimensions,
   buildAnalysisResult,
 } from '../services/objectRecognition.js';
@@ -182,31 +184,108 @@ function mergeVehicleDimensions(
   };
 }
 
-function createActionKeyAssigner() {
-  const reserved = new Set<string>();
-  return {
-    reserve(action: string): string | undefined {
-      const key = reservePreferredGeminiKey(reserved);
-      if (key) {
-        reserved.add(key);
-        console.log(`[video keys] ${action} -> ...${key.slice(-4)}`);
+async function runPlannedGeminiSteps<T>(
+  steps: RunnableStep<T>[],
+  onStepComplete?: (value: T, index: number, meta: StepExecutionResult<T>['metadata']) => Promise<void> | void,
+  options: { parallel?: boolean; softErrorStepIds?: string[]; onSoftError?: (error: unknown, index: number) => Promise<void> | void } = {},
+): Promise<T[]> {
+  if (steps.length === 0) return [];
+
+  const plan = await planGeminiSteps(steps.map((step) => ({
+    id: step.id,
+    name: step.name,
+    allowSharedFallback: step.allowSharedFallback,
+    timeoutMs: step.timeoutMs,
+    maxRetries: step.maxRetries,
+  })));
+  const runner = getGeminiStepRunner();
+  const results: Array<T | undefined> = new Array(steps.length).fill(undefined);
+
+  const canParallelize = Boolean(
+    options.parallel
+    && steps.length > 1
+    && new Set(plan.map((assignment) => assignment.preferredKey).filter(Boolean)).size > 1
+  );
+
+  if (canParallelize) {
+    const parallelIndexes = steps
+      .map((_, index) => index)
+      .filter((index) => Boolean(plan[index].preferredKey));
+    const sequentialIndexes = steps
+      .map((_, index) => index)
+      .filter((index) => !plan[index].preferredKey);
+
+    const settled = await Promise.allSettled(
+      parallelIndexes.map((index) => {
+        const step = steps[index];
+        return runner.runStep({
+        ...step,
+        preferredKey: plan[index].preferredKey,
+        allowSharedFallback: true,
+      }).then(async (result) => {
+        console.warn(`[video step] ${step.name} -> ...${result.metadata.keyUsed.slice(-4)}${result.metadata.sharedFallbackUsed ? ' (shared)' : ''}`);
+        await onStepComplete?.(result.value, index, result.metadata);
+        return result;
+      });
+      })
+    );
+
+    for (const [offset, settledResult] of settled.entries()) {
+      const index = parallelIndexes[offset];
+      if (settledResult.status === 'rejected') {
+        if (options.softErrorStepIds?.includes(steps[index].id)) {
+          await options.onSoftError?.(settledResult.reason, index);
+          continue;
+        }
+        throw settledResult.reason;
       }
-      return key;
-    },
-    release(key?: string): void {
-      if (!key) return;
-      reserved.delete(key);
-      releasePreferredGeminiKey(key);
-    },
-    probeAvailable(): boolean {
-      const probe = reservePreferredGeminiKey(reserved);
-      if (!probe) return false;
-      reserved.add(probe);
-      reserved.delete(probe);
-      releasePreferredGeminiKey(probe);
-      return true;
-    },
-  };
+      results[index] = settledResult.value.value;
+    }
+
+    for (const index of sequentialIndexes) {
+      const step = steps[index];
+      try {
+        const result = await runner.runStep({
+          ...step,
+          preferredKey: plan[index].preferredKey,
+          allowSharedFallback: true,
+        });
+        console.warn(`[video step] ${step.name} -> ...${result.metadata.keyUsed.slice(-4)}${result.metadata.sharedFallbackUsed ? ' (shared)' : ''}`);
+        results[index] = result.value;
+        await onStepComplete?.(result.value, index, result.metadata);
+      } catch (error) {
+        if (options.softErrorStepIds?.includes(step.id)) {
+          await options.onSoftError?.(error, index);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return results.filter((value): value is T => value !== undefined);
+  }
+
+  for (const [index, step] of steps.entries()) {
+    const assignment = plan[index];
+    try {
+      const result = await runner.runStep({
+        ...step,
+        preferredKey: assignment.preferredKey,
+        allowSharedFallback: true,
+      });
+      console.warn(`[video step] ${step.name} -> ...${result.metadata.keyUsed.slice(-4)}${result.metadata.sharedFallbackUsed ? ' (shared)' : ''}`);
+      results[index] = result.value;
+      await onStepComplete?.(result.value, index, result.metadata);
+    } catch (error) {
+      if (options.softErrorStepIds?.includes(step.id)) {
+        await options.onSoftError?.(error, index);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return results.filter((value): value is T => value !== undefined);
 }
 
 // ── POST /api/video/upload  (single video) ────────────────────────────────────
@@ -428,7 +507,6 @@ router.delete('/:jobId', (req: Request, res: Response) => {
 
 async function runAnalysis(job: VideoJob): Promise<void> {
   const jobId = job.id;
-  const actionKeys = createActionKeyAssigner();
   let partialObject: ObjectIdentification | null = null;
   let partialFeatures: ExtractedFeature[] = [];
   let partialVehicle: VehicleIdentification | undefined;
@@ -473,18 +551,14 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     // ── Phase 2: Identify object ─────────────────────────────────────────────
     updateJob(jobId, { status: 'analyzing' });
 
-    const objectInfo = partialObject ?? await (async () => {
-      const identifyObjectKey = actionKeys.reserve('identify-object');
-      try {
-        return await identifyObject(
-          framePaths,
-          undefined,
-          identifyObjectKey,
-        );
-      } finally {
-        actionKeys.release(identifyObjectKey);
-      }
-    })();
+    const objectInfo = partialObject ?? (await runPlannedGeminiSteps([
+      {
+        id: 'identify-object',
+        name: 'identify-object',
+        allowSharedFallback: true,
+        run: (apiKey) => identifyObject(framePaths, undefined, undefined, apiKey),
+      },
+    ]))[0];
     partialObject = objectInfo;
     writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
       featureExtractionComplete,
@@ -496,84 +570,59 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     });
 
     // ── Phase 3: Extract features from all frames ────────────────────────────
-    const vehicleKey = shouldAttemptVehicleLookup(objectInfo) && !partialVehicle ? actionKeys.reserve('identify-vehicle') : undefined;
     let rawFeatures: ExtractedFeature[] = partialFeatures;
     let vehicleResult: VehicleIdentification | { found: false } = partialVehicle ?? { found: false };
-    try {
-      const needsFeatureExtraction = !featureExtractionComplete;
-      const needsVehicleLookup = shouldAttemptVehicleLookup(objectInfo) && !partialVehicle;
-      const firstParallelBatchKey = needsFeatureExtraction && needsVehicleLookup && vehicleKey
-        ? actionKeys.reserve('extract-features-batch-1')
-        : undefined;
-      const canRunVehicleInParallel = Boolean(needsFeatureExtraction && needsVehicleLookup && vehicleKey && firstParallelBatchKey);
-      if (canRunVehicleInParallel) {
-        const [featureOutcome, vehicleOutcome] = await Promise.allSettled([
-          extractFeatures(framePaths, objectInfo, undefined, (batchIndex) => {
-            const preferredApiKey = batchIndex === 0 ? firstParallelBatchKey : actionKeys.reserve(`extract-features-batch-${batchIndex + 1}`);
-            return {
-              preferredApiKey,
-              avoidApiKeys: [vehicleKey].filter(Boolean) as string[],
-              release: () => actionKeys.release(preferredApiKey),
-            };
-          }, (features) => {
-            partialFeatures = features;
-            writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-              featureExtractionComplete,
-              vehicleDimensionSearchComplete,
-            });
-          }),
-          identifyVehicleFromImages(framePaths, undefined, vehicleKey, [firstParallelBatchKey].filter(Boolean) as string[]).then((result) => {
-            if (result.found) partialVehicle = result;
-            writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-              featureExtractionComplete,
-              vehicleDimensionSearchComplete,
-            });
-            return result;
-          }),
-        ]);
-        if (featureOutcome.status === 'fulfilled') {
-          rawFeatures = featureOutcome.value;
-        }
-        if (vehicleOutcome.status === 'fulfilled') {
-          vehicleResult = vehicleOutcome.value;
-        }
-        if (featureOutcome.status === 'rejected') throw featureOutcome.reason;
-        if (vehicleOutcome.status === 'rejected') throw vehicleOutcome.reason;
-      } else {
-        actionKeys.release(firstParallelBatchKey);
-        actionKeys.release(vehicleKey);
-        if (needsFeatureExtraction) {
-          rawFeatures = await extractFeatures(framePaths, objectInfo, undefined, (batchIndex) => {
-            const preferredApiKey = actionKeys.reserve(`extract-features-batch-${batchIndex + 1}`);
-            return {
-              preferredApiKey,
-              release: () => actionKeys.release(preferredApiKey),
-            };
-          }, (features) => {
-            partialFeatures = features;
-            writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-              featureExtractionComplete,
-              vehicleDimensionSearchComplete,
-            });
-          });
-        }
-        if (needsVehicleLookup) {
-          const sequentialVehicleKey = actionKeys.reserve('identify-vehicle-sequential');
-          vehicleResult = await identifyVehicleFromImages(framePaths, undefined, sequentialVehicleKey, []);
-          if (vehicleResult.found) partialVehicle = vehicleResult;
-          writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-            featureExtractionComplete,
-            vehicleDimensionSearchComplete,
-          });
-          actionKeys.release(sequentialVehicleKey);
-        }
+    const needsFeatureExtraction = !featureExtractionComplete;
+    const needsVehicleLookup = shouldAttemptVehicleLookup(objectInfo) && !partialVehicle;
+    const featureBatchSize = 4;
+    const phase3Steps: RunnableStep<unknown>[] = [];
+
+    if (needsFeatureExtraction) {
+      for (let i = 0; i < framePaths.length; i += featureBatchSize) {
+        const batch = framePaths.slice(i, i + featureBatchSize);
+        const batchIndex = Math.floor(i / featureBatchSize);
+        phase3Steps.push({
+          id: `extract-features-batch-${batchIndex + 1}`,
+          name: `extract-features-batch-${batchIndex + 1}`,
+          allowSharedFallback: true,
+          run: (apiKey) => extractFeaturesBatch(batch, objectInfo, undefined, undefined, apiKey),
+        });
       }
-    } finally {
-      actionKeys.release(vehicleKey);
+    }
+
+    if (needsVehicleLookup) {
+      phase3Steps.push({
+        id: 'identify-vehicle',
+        name: 'identify-vehicle',
+        allowSharedFallback: true,
+        run: (apiKey) => identifyVehicleFromImages(framePaths, undefined, undefined, apiKey),
+      });
+    }
+
+    await runPlannedGeminiSteps(phase3Steps, async (value, index) => {
+      const step = phase3Steps[index];
+      if (step.id.startsWith('extract-features-batch-')) {
+        rawFeatures = mergeFeatures([...rawFeatures, ...(value as ExtractedFeature[])]);
+        partialFeatures = rawFeatures;
+      } else if (step.id === 'identify-vehicle') {
+        vehicleResult = value as VehicleIdentification | { found: false };
+        partialVehicle = vehicleResult.found ? vehicleResult : partialVehicle;
+      }
+      writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+        featureExtractionComplete,
+        vehicleDimensionSearchComplete,
+      });
+    }, { parallel: true });
+
+    if (needsFeatureExtraction) {
+      rawFeatures = partialFeatures;
+      featureExtractionComplete = true;
+    }
+    if (needsVehicleLookup && partialVehicle) {
+      vehicleResult = partialVehicle;
     }
     partialFeatures = rawFeatures;
     partialVehicle = vehicleResult.found ? vehicleResult : undefined;
-    featureExtractionComplete = true;
     writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
       featureExtractionComplete,
       vehicleDimensionSearchComplete,
@@ -583,77 +632,49 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     updateJob(jobId, { status: 'searching' });
     const needsFeatureSearch = rawFeatures.some((f) => f.value_mm === null || f.confidence === 'low');
     const needsVehicleDimensionSearch = vehicleResult.found && !vehicleDimensionSearchComplete;
-    const searchDimensionsKey = needsFeatureSearch ? actionKeys.reserve('search-missing-dimensions') : undefined;
-    const vehicleDimsKey = needsVehicleDimensionSearch ? actionKeys.reserve('search-vehicle-dimensions') : undefined;
-    const searchAvoid = [vehicleDimsKey].filter(Boolean) as string[];
-    const vehicleDimsAvoid = [searchDimensionsKey].filter(Boolean) as string[];
     let enrichedFeatures: ExtractedFeature[] = rawFeatures;
     let vehicleDimensions: PartialVehicleDimensions | undefined = partialVehicleDimensions;
-    try {
-      const canRunSearchesInParallel = Boolean(needsFeatureSearch && needsVehicleDimensionSearch && vehicleDimsKey && actionKeys.probeAvailable());
-      if (canRunSearchesInParallel) {
-        const [dimensionOutcome, vehicleDimsOutcome] = await Promise.allSettled([
-          searchMissingDimensions(rawFeatures, objectInfo, undefined, searchDimensionsKey, searchAvoid),
-          vehicleResult.found
-            ? searchVehicleDimensionsPartial(vehicleResult, undefined, vehicleDimsKey, vehicleDimsAvoid).then((dims) => {
-                const merged = mergeVehicleDimensions(partialVehicleDimensions, dims);
-                partialVehicleDimensions = merged;
-                return merged;
-              }).catch((err) => {
-                console.warn(`[video] Vehicle dimension lookup skipped: ${err instanceof Error ? err.message : String(err)}`);
-                return undefined;
-              })
-            : Promise.resolve(undefined),
-        ]);
-        if (dimensionOutcome.status === 'fulfilled') {
-          enrichedFeatures = dimensionOutcome.value;
-          partialFeatures = enrichedFeatures;
-          writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-            featureExtractionComplete,
-            vehicleDimensionSearchComplete,
-          });
-        }
-        if (vehicleDimsOutcome.status === 'fulfilled') {
-          vehicleDimensions = mergeVehicleDimensions(partialVehicleDimensions, vehicleDimsOutcome.value);
-          partialVehicleDimensions = vehicleDimensions;
-          writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-            featureExtractionComplete,
-            vehicleDimensionSearchComplete,
-          });
-        }
-        if (dimensionOutcome.status === 'rejected') throw dimensionOutcome.reason;
-        if (vehicleDimsOutcome.status === 'rejected') throw vehicleDimsOutcome.reason;
-      } else {
-        actionKeys.release(vehicleDimsKey);
-        if (needsFeatureSearch) {
-          enrichedFeatures = await searchMissingDimensions(rawFeatures, objectInfo, undefined, searchDimensionsKey, []);
-          partialFeatures = enrichedFeatures;
-          writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-            featureExtractionComplete,
-            vehicleDimensionSearchComplete,
-          });
-          actionKeys.release(searchDimensionsKey);
-        }
-        const sequentialVehicleDimsKey = needsVehicleDimensionSearch ? actionKeys.reserve('search-vehicle-dimensions-sequential') : undefined;
-        vehicleDimensions = needsVehicleDimensionSearch
-          ? await searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, sequentialVehicleDimsKey, []).then((dims) => {
-              const merged = mergeVehicleDimensions(partialVehicleDimensions, dims);
-              partialVehicleDimensions = merged;
-              writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-                featureExtractionComplete,
-                vehicleDimensionSearchComplete,
-              });
-              return merged;
-            }).catch((err) => {
-              console.warn(`[video] Vehicle dimension lookup skipped: ${err instanceof Error ? err.message : String(err)}`);
-              return partialVehicleDimensions;
-            })
-          : vehicleDimensions;
-        actionKeys.release(sequentialVehicleDimsKey);
+    const phase4Steps: RunnableStep<unknown>[] = [];
+    if (needsFeatureSearch) {
+      phase4Steps.push({
+        id: 'search-missing-dimensions',
+        name: 'search-missing-dimensions',
+        allowSharedFallback: true,
+        run: (apiKey) => searchMissingDimensions(rawFeatures, objectInfo, undefined, undefined, apiKey),
+      });
+    }
+    if (needsVehicleDimensionSearch) {
+      phase4Steps.push({
+        id: 'search-vehicle-dimensions',
+        name: 'search-vehicle-dimensions',
+        allowSharedFallback: true,
+        run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey),
+      });
+    }
+
+    await runPlannedGeminiSteps(phase4Steps, async (value, index) => {
+      const step = phase4Steps[index];
+      if (step.id === 'search-missing-dimensions') {
+        enrichedFeatures = value as ExtractedFeature[];
+        partialFeatures = enrichedFeatures;
+      } else if (step.id === 'search-vehicle-dimensions') {
+        vehicleDimensions = mergeVehicleDimensions(partialVehicleDimensions, value as PartialVehicleDimensions | undefined);
+        partialVehicleDimensions = vehicleDimensions;
       }
-    } finally {
-      actionKeys.release(searchDimensionsKey);
-      actionKeys.release(vehicleDimsKey);
+      writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+        featureExtractionComplete,
+        vehicleDimensionSearchComplete,
+      });
+    }, {
+      parallel: true,
+      softErrorStepIds: ['search-vehicle-dimensions'],
+      onSoftError: async (error) => {
+        console.warn(`[video] Vehicle dimension lookup skipped after retries: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    });
+
+    if (needsFeatureSearch) {
+      rawFeatures = enrichedFeatures;
     }
     partialFeatures = enrichedFeatures;
     partialVehicleDimensions = vehicleDimensions;

@@ -1,6 +1,10 @@
 # ---------- build stage ----------
 FROM node:22-bookworm-slim AS builder
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -14,6 +18,7 @@ FROM node:22-bookworm-slim
 # Use a venv to avoid Debian's externally-managed-environment restrictions
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        git \
         python3 python3-pip python3-venv \
         libgl1 libglib2.0-0 \
         ffmpeg && \
