@@ -182,6 +182,21 @@ Vehicle analysis result:
 ${JSON.stringify(data, null, 2)}`;
 }
 
+function normalizeFeatureScriptCode(code: string): string {
+  const fenceMatch = code.match(/```(?:featurescript|javascript|typescript|fs|onshapeFeatureScript)?\s*\n([\s\S]*?)```/i);
+  return fenceMatch ? fenceMatch[1].trim() : code.trim();
+}
+
+function isValidFeatureScriptCode(code: string): boolean {
+  const normalized = normalizeFeatureScriptCode(code);
+  return /^\uFEFF?FeatureScript 2909;/.test(normalized)
+    && /import\s*\(\s*path\s*:\s*"onshape\/std\/common\.fs"\s*,\s*version\s*:\s*"2909\.0"\s*\);/.test(normalized)
+    && /annotation\s*\{\s*"Feature Type Name"/.test(normalized)
+    && /export\s+const\s+/.test(normalized)
+    && /defineFeature\s*\(\s*function\s*\(\s*context\s+is\s+Context\s*,\s*id\s+is\s+Id/.test(normalized)
+    && !normalized.includes('include "common.fs"');
+}
+
 // ── Reference FeatureScript (L390 Battery) for few-shot prompting ────────────
 const REFERENCE_FS = `FeatureScript 2909;
 import(path : "onshape/std/common.fs", version : "2909.0");
@@ -371,10 +386,9 @@ Generate the complete FeatureScript code. Output ONLY code, no explanation.`;
       projectId: measurementData.projectId,
     });
 
-    let code = result.text;
-    const fenceMatch = code.match(/```(?:featurescript|javascript|typescript|fs)?\s*\n([\s\S]*?)```/);
-    if (fenceMatch) {
-      code = fenceMatch[1].trim();
+    const code = normalizeFeatureScriptCode(result.text);
+    if (!isValidFeatureScriptCode(code)) {
+      throw new Error('Gemini returned invalid FeatureScript format');
     }
 
     res.json({ code, method: 'gemini' });
