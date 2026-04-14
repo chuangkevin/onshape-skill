@@ -4,8 +4,7 @@ import { getDb } from './db.js';
 let cachedKeys: string[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 60_000;
-
-// keyIndex removed — using random selection to distribute load evenly
+let keyIndex = 0;
 
 function loadKeys(db?: Database.Database): string[] {
   const now = Date.now();
@@ -50,35 +49,23 @@ function loadKeys(db?: Database.Database): string[] {
   return cachedKeys;
 }
 
-/** Get a random API key, skipping known bad keys.
- *  Random selection distributes load evenly across all keys. */
+/** Get an API key using round-robin rotation, skipping known bad keys when possible. */
 export function getGeminiApiKey(db?: Database.Database, skipKeys?: Set<string>): string {
   const keys = loadKeys(db);
   if (keys.length === 0) {
     throw new Error('No Gemini API keys configured');
   }
 
-  // Filter out bad keys
-  const available = skipKeys
-    ? keys.filter(k => !skipKeys.has(k))
-    : keys;
-
-  if (available.length > 0) {
-    return available[Math.floor(Math.random() * available.length)];
-  }
-
-  // All keys are in skipKeys, pick random anyway
-  return keys[Math.floor(Math.random() * keys.length)];
+  return pickNextKey(keys, skipKeys);
 }
 
 /** Get a key excluding the failed one (for 429 failover) */
 export function getGeminiApiKeyExcluding(failedKey: string, db?: Database.Database): string {
   const keys = loadKeys(db);
-  const available = keys.filter((k) => k !== failedKey);
-  if (available.length === 0) {
+  if (keys.every((k) => k === failedKey)) {
     throw new Error('No alternative Gemini API keys available');
   }
-  return available[Math.floor(Math.random() * available.length)];
+  return pickNextKey(keys, new Set([failedKey]));
 }
 
 /** Get the configured Gemini model */
@@ -201,5 +188,21 @@ export function invalidateKeyCache(): void {
 
 /** Reset key state (for testing) */
 export function resetKeyIndex(): void {
-  // No-op: random selection doesn't need reset
+  keyIndex = 0;
+}
+
+function pickNextKey(keys: string[], excluded?: Set<string>): string {
+  const total = keys.length;
+  for (let offset = 0; offset < total; offset++) {
+    const idx = (keyIndex + offset) % total;
+    const candidate = keys[idx];
+    if (!excluded?.has(candidate)) {
+      keyIndex = (idx + 1) % total;
+      return candidate;
+    }
+  }
+
+  const key = keys[keyIndex % total];
+  keyIndex = (keyIndex + 1) % total;
+  return key;
 }

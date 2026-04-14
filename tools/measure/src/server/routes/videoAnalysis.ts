@@ -23,6 +23,7 @@ import {
   searchMissingDimensions,
   buildAnalysisResult,
 } from '../services/objectRecognition.js';
+import { identifyVehicleFromImages, searchVehicleDimensionsPartial } from '../services/search.js';
 import type { VideoJob, VideoAnalysisResult, VideoAnalysisSSEEvent } from '../../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,18 @@ function updateJob(jobId: string, fields: Partial<VideoJob>): void {
 
 function sseEmit(res: Response, event: VideoAnalysisSSEEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function shouldAttemptVehicleLookup(objectInfo: { object_type: string; common_name: string; description: string; estimated_size_class: string }): boolean {
+  const haystack = `${objectInfo.common_name} ${objectInfo.description}`.toLowerCase();
+  return objectInfo.object_type === 'car'
+    || objectInfo.estimated_size_class === 'vehicle'
+    || haystack.includes('car')
+    || haystack.includes('vehicle')
+    || haystack.includes('suv')
+    || haystack.includes('sedan')
+    || haystack.includes('truck')
+    || haystack.includes('coupe');
 }
 
 // ── POST /api/video/upload  (single video) ────────────────────────────────────
@@ -295,14 +308,32 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     });
 
     // ── Phase 3: Extract features from all frames ────────────────────────────
-    const rawFeatures = await extractFeatures(framePaths, objectInfo);
+    const [rawFeatures, vehicleResult] = await Promise.all([
+      extractFeatures(framePaths, objectInfo),
+      shouldAttemptVehicleLookup(objectInfo)
+        ? identifyVehicleFromImages(framePaths)
+        : Promise.resolve({ found: false } as const),
+    ]);
 
     // ── Phase 4: Web search for missing dimensions ───────────────────────────
     updateJob(jobId, { status: 'searching' });
-    const enrichedFeatures = await searchMissingDimensions(rawFeatures, objectInfo);
+    const [enrichedFeatures, vehicleDimensions] = await Promise.all([
+      searchMissingDimensions(rawFeatures, objectInfo),
+      vehicleResult.found
+        ? searchVehicleDimensionsPartial(vehicleResult).catch((err) => {
+            console.warn(`[video] Vehicle dimension lookup skipped: ${err instanceof Error ? err.message : String(err)}`);
+            return undefined;
+          })
+        : Promise.resolve(undefined),
+    ]);
 
     // ── Phase 5: Save result ─────────────────────────────────────────────────
-    const result = buildAnalysisResult(objectInfo, enrichedFeatures);
+    const result = buildAnalysisResult(
+      objectInfo,
+      enrichedFeatures,
+      vehicleResult.found ? vehicleResult : undefined,
+      vehicleDimensions,
+    );
     updateJob(jobId, {
       status: 'done',
       features_json: JSON.stringify(result),

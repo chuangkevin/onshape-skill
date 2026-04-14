@@ -26,6 +26,15 @@ const SOURCE_LABEL: Record<string, string> = {
   web_search: '網路搜尋',
 };
 
+const VIEW_ANGLE_LABEL: Record<string, string> = {
+  side: '側面',
+  front: '正面',
+  rear: '後方',
+  top: '頂部',
+  three_quarter: '3/4 視角',
+  unknown: '未知',
+};
+
 export default function FeatureList({ result, onReset }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('feature_name');
   const [sortAsc, setSortAsc] = useState(true);
@@ -102,9 +111,40 @@ export default function FeatureList({ result, onReset }: Props) {
 
   const highCount = result.features.filter((f) => f.confidence === 'high').length;
   const knownDims = result.features.filter((f) => f.value_mm !== null).length;
+  const vehicleLabel = result.vehicle
+    ? [result.vehicle.year, result.vehicle.make, result.vehicle.model, result.vehicle.variant].filter(Boolean).join(' ')
+    : null;
 
   return (
     <div className="space-y-5">
+      {result.vehicle && (
+        <div className="rounded-xl p-4 space-y-3" style={{ background: 'rgba(31,111,235,0.08)', border: '1px solid rgba(31,111,235,0.25)' }}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--accent)' }}>車型識別</p>
+              <h2 className="text-xl font-bold">{vehicleLabel}</h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                視角：{VIEW_ANGLE_LABEL[result.vehicle.view_angle] ?? result.vehicle.view_angle}
+              </p>
+            </div>
+            <span className="shrink-0 px-2 py-1 rounded text-xs font-medium" style={{ background: '#1f3a5e', color: '#79c0ff' }}>
+              Vehicle
+            </span>
+          </div>
+
+          {result.vehicle_dimensions && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+              {result.vehicle_dimensions.length_mm && <Stat label="車長" value={`${result.vehicle_dimensions.length_mm} mm`} />}
+              {result.vehicle_dimensions.width_mm && <Stat label="車寬" value={`${result.vehicle_dimensions.width_mm} mm`} />}
+              {result.vehicle_dimensions.height_mm && <Stat label="車高" value={`${result.vehicle_dimensions.height_mm} mm`} />}
+              {result.vehicle_dimensions.wheelbase_mm && <Stat label="軸距" value={`${result.vehicle_dimensions.wheelbase_mm} mm`} />}
+              {result.vehicle_dimensions.front_track_mm && <Stat label="前輪距" value={`${result.vehicle_dimensions.front_track_mm} mm`} />}
+              {result.vehicle_dimensions.rear_track_mm && <Stat label="後輪距" value={`${result.vehicle_dimensions.rear_track_mm} mm`} />}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Object summary card */}
       <div className="rounded-xl p-4 space-y-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-start justify-between gap-4">

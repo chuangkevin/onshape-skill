@@ -11,7 +11,13 @@
  */
 
 import { callGemini } from '../geminiClient.js';
-import type { ExtractedFeature, ObjectIdentification, VideoAnalysisResult } from '../../shared/types.js';
+import type {
+  ExtractedFeature,
+  ObjectIdentification,
+  PartialVehicleDimensions,
+  VehicleIdentification,
+  VideoAnalysisResult,
+} from '../../shared/types.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -234,6 +240,8 @@ Return only the JSON array, no extra text.`;
 export function buildAnalysisResult(
   objectInfo: ObjectIdentification,
   features: ExtractedFeature[],
+  vehicle?: VehicleIdentification,
+  vehicle_dimensions?: PartialVehicleDimensions,
 ): VideoAnalysisResult {
   const highConf = features.filter((f) => f.confidence === 'high').length;
   const total = features.length;
@@ -249,6 +257,8 @@ export function buildAnalysisResult(
     overall_confidence: overallConfidence,
     feature_count: total,
     modelling_ready: features.some((f) => f.value_mm !== null && f.confidence !== 'low'),
+    vehicle,
+    vehicle_dimensions,
   };
 }
 

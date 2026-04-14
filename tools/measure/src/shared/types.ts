@@ -221,6 +221,8 @@ export interface VideoAnalysisResult {
   overall_confidence: 'high' | 'medium' | 'low';
   feature_count: number;
   modelling_ready: boolean;
+  vehicle?: VehicleIdentification;
+  vehicle_dimensions?: PartialVehicleDimensions;
 }
 
 export interface VideoJob {
@@ -260,6 +262,15 @@ export interface VehicleDimensions {
   length_mm: number;
   width_mm: number;
   height_mm: number;
+  wheelbase_mm?: number;
+  front_track_mm?: number;
+  rear_track_mm?: number;
+}
+
+export interface PartialVehicleDimensions {
+  length_mm?: number;
+  width_mm?: number;
+  height_mm?: number;
   wheelbase_mm?: number;
   front_track_mm?: number;
   rear_track_mm?: number;

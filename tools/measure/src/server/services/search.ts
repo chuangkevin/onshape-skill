@@ -1,5 +1,5 @@
 import { callGemini } from '../geminiClient.js';
-import type { LabelInfo, OfficialSpec, VehicleIdentification, VehicleDimensions } from '@shared/types.js';
+import type { LabelInfo, OfficialSpec, PartialVehicleDimensions, VehicleIdentification, VehicleDimensions } from '@shared/types.js';
 
 const LABEL_PROMPT = `You are analyzing a photo of a product/component. Look for any visible text labels, model numbers, specifications printed on the item.
 
@@ -169,6 +169,22 @@ export async function identifyVehicle(
   };
 }
 
+export async function identifyVehicleFromImages(
+  imagePaths: string[],
+  projectId?: number,
+): Promise<VehicleIdentification | { found: false }> {
+  const samples = sampleImages(imagePaths, 5);
+  for (const imagePath of samples) {
+    try {
+      const result = await identifyVehicle(imagePath, projectId);
+      if (result.found) return result;
+    } catch (err) {
+      console.warn(`[vehicle-identify] failed for ${imagePath}:`, err);
+    }
+  }
+  return { found: false };
+}
+
 /**
  * Use Gemini with Google Search grounding to find official vehicle dimensions.
  * Throws an error if specs cannot be found — no fallback to default values.
@@ -220,6 +236,48 @@ export async function searchVehicleDimensions(
   return dims;
 }
 
+export async function searchVehicleDimensionsPartial(
+  vehicle: VehicleIdentification,
+  projectId?: number,
+): Promise<PartialVehicleDimensions> {
+  const yearPrefix = vehicle.year ? `${vehicle.year} ` : '';
+  const variantSuffix = vehicle.variant ? ` ${vehicle.variant}` : '';
+  const prompt = VEHICLE_DIMS_PROMPT
+    .replace('{year}', yearPrefix)
+    .replace('{make}', vehicle.make)
+    .replace('{model}', vehicle.model)
+    .replace('{variant}', variantSuffix);
+
+  const { text } = await callGemini({
+    prompt,
+    callType: 'vehicle-dims-search',
+    projectId,
+    useGrounding: true,
+  });
+
+  const parsed = parseJsonFromText(text);
+  if (!parsed) {
+    throw new Error(`Vehicle dimension search for ${vehicle.make} ${vehicle.model}: Gemini returned unparseable response`);
+  }
+  if (parsed.error) {
+    throw new Error(`Vehicle dimension search for ${vehicle.make} ${vehicle.model}: ${parsed.reason ?? parsed.error}`);
+  }
+
+  const dims: PartialVehicleDimensions = {};
+  if (typeof parsed.length_mm === 'number') dims.length_mm = parsed.length_mm;
+  if (typeof parsed.width_mm === 'number') dims.width_mm = parsed.width_mm;
+  if (typeof parsed.height_mm === 'number') dims.height_mm = parsed.height_mm;
+  if (typeof parsed.wheelbase_mm === 'number') dims.wheelbase_mm = parsed.wheelbase_mm;
+  if (typeof parsed.front_track_mm === 'number') dims.front_track_mm = parsed.front_track_mm;
+  if (typeof parsed.rear_track_mm === 'number') dims.rear_track_mm = parsed.rear_track_mm;
+
+  if (Object.keys(dims).length === 0) {
+    throw new Error(`Vehicle dimension search for ${vehicle.make} ${vehicle.model}: no confirmed dimensions returned`);
+  }
+
+  return dims;
+}
+
 function parseJsonFromText(text: string): any {
   try { return JSON.parse(text); } catch {}
   const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -227,4 +285,10 @@ function parseJsonFromText(text: string): any {
   const objMatch = text.match(/\{[\s\S]*\}/);
   if (objMatch) { try { return JSON.parse(objMatch[0]); } catch {} }
   return null;
+}
+
+function sampleImages(paths: string[], count: number): string[] {
+  if (paths.length <= count) return paths;
+  const step = (paths.length - 1) / (count - 1);
+  return Array.from({ length: count }, (_, i) => paths[Math.round(i * step)]);
 }

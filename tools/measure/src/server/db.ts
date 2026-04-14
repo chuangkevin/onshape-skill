@@ -28,6 +28,15 @@ export function createTestDb(): Database.Database {
   const testDb = new Database(':memory:');
   testDb.pragma('foreign_keys = ON');
   runMigrations(testDb);
+  testDb.prepare(
+    "UPDATE settings SET value = ? WHERE key = 'gemini_api_keys' AND value = ''"
+  ).run([
+    'AIzaSyTestKey0000000000000000000000001',
+    'AIzaSyTestKey0000000000000000000000002',
+    'AIzaSyTestKey0000000000000000000000003',
+    'AIzaSyTestKey0000000000000000000000004',
+    'AIzaSyTestKey0000000000000000000000005',
+  ].join(','));
   return testDb;
 }
 
