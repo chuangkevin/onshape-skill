@@ -31,6 +31,16 @@ function parseJson<T>(text: string, fallback: T): T {
   }
 }
 
+function normalizeEstimatedSizeClass(value: unknown): ObjectIdentification['estimated_size_class'] {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized.includes('vehicle')) return 'vehicle';
+  if (normalized.includes('large')) return 'large';
+  if (normalized.includes('medium')) return 'medium';
+  if (normalized.includes('small')) return 'small';
+  if (normalized.includes('tiny')) return 'tiny';
+  return 'medium';
+}
+
 // ── Step 1: Object Identification ────────────────────────────────────────────
 
 /**
@@ -72,7 +82,7 @@ Return only valid JSON, no extra text.`;
     model_number: parsed.model_number ?? null,
     manufacturer: parsed.manufacturer ?? null,
     description: parsed.description ?? '',
-    estimated_size_class: parsed.estimated_size_class ?? 'medium',
+    estimated_size_class: normalizeEstimatedSizeClass(parsed.estimated_size_class),
   };
 }
 

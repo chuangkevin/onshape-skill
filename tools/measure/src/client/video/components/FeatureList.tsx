@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import type { VideoAnalysisResult, ExtractedFeature } from '@shared/types';
+import { generateFeatureScript } from '../../api/client';
 
 interface Props {
   result: VideoAnalysisResult;
@@ -40,6 +41,10 @@ export default function FeatureList({ result, onReset }: Props) {
   const [sortAsc, setSortAsc] = useState(true);
   const [filterConf, setFilterConf] = useState<FilterConf>('all');
   const [search, setSearch] = useState('');
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [generatingCode, setGeneratingCode] = useState(false);
+  const [codeMethod, setCodeMethod] = useState<'gemini' | 'fallback' | null>(null);
 
   const sorted = useMemo(() => {
     let list = result.features.filter((f) => {
@@ -109,11 +114,39 @@ export default function FeatureList({ result, onReset }: Props) {
     URL.revokeObjectURL(url);
   }
 
+  async function handleGenerateFeatureScript() {
+    setCodeOpen(true);
+    setGeneratingCode(true);
+    setCodeMethod(null);
+    setCode('生成中...');
+    try {
+      const resp = await generateFeatureScript(result);
+      setCode(resp.code || '生成失敗');
+      setCodeMethod(resp.method || null);
+    } catch (err: any) {
+      setCode(`錯誤：${err?.message || 'FeatureScript generation failed'}`);
+      setCodeMethod(null);
+    } finally {
+      setGeneratingCode(false);
+    }
+  }
+
+  async function copyCode() {
+    await navigator.clipboard.writeText(code);
+  }
+
   const highCount = result.features.filter((f) => f.confidence === 'high').length;
   const knownDims = result.features.filter((f) => f.value_mm !== null).length;
   const vehicleLabel = result.vehicle
     ? [result.vehicle.year, result.vehicle.make, result.vehicle.model, result.vehicle.variant].filter(Boolean).join(' ')
     : null;
+  const sizeClass = String(result.object.estimated_size_class || '').toLowerCase();
+  const canGenerateFeatureScript = Boolean(
+    result.vehicle
+    || result.vehicle_dimensions
+    || result.object.object_type === 'car'
+    || sizeClass.includes('vehicle')
+  );
 
   return (
     <div className="space-y-5">
@@ -200,6 +233,9 @@ export default function FeatureList({ result, onReset }: Props) {
           <option value="low">低</option>
         </select>
         <div className="ml-auto flex gap-2">
+          <button onClick={handleGenerateFeatureScript} disabled={generatingCode || !canGenerateFeatureScript} className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed" style={{ background: '#1f6feb', color: '#fff' }}>
+            {generatingCode ? '生成中...' : '生成 FeatureScript'}
+          </button>
           <button onClick={exportCSV} className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
             ↓ CSV
           </button>
@@ -282,6 +318,43 @@ export default function FeatureList({ result, onReset }: Props) {
           ← 分析新影片
         </button>
       </div>
+
+      {!canGenerateFeatureScript && (
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'rgba(210,153,34,0.12)', border: '1px solid rgba(210,153,34,0.3)', color: '#e3b341' }}>
+          目前只有辨識到車型或車輛尺寸時，才會開放直接生成車輛 FeatureScript。
+        </div>
+      )}
+
+      {codeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setCodeOpen(false)}>
+          <div className="w-full max-w-5xl rounded-xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+              <div className="flex items-center gap-3">
+                <h3 className="font-semibold">FeatureScript</h3>
+                {codeMethod && (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ background: codeMethod === 'gemini' ? '#1e3a29' : '#3a2a1e', color: codeMethod === 'gemini' ? '#56d364' : '#e3b341' }}>
+                    {codeMethod === 'gemini' ? 'Gemini 生成' : 'Fallback 簡化模型'}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={copyCode} disabled={generatingCode} className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                  複製程式碼
+                </button>
+                <button onClick={() => setCodeOpen(false)} className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors" style={{ background: '#1f6feb', color: '#fff' }}>
+                  關閉
+                </button>
+              </div>
+            </div>
+            {codeMethod === 'fallback' && (
+              <div className="px-4 py-2 text-sm" style={{ background: 'rgba(210,153,34,0.12)', color: '#e3b341', borderBottom: '1px solid var(--border)' }}>
+                Gemini 失敗時已改用簡化車模 fallback。你仍可直接貼進 Onshape，再手動細修外觀比例。
+              </div>
+            )}
+            <pre className="m-0 p-4 overflow-auto text-sm" style={{ maxHeight: '70vh', background: '#0d1117', color: '#c9d1d9' }}><code>{code}</code></pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

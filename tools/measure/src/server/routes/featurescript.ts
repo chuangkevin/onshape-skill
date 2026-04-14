@@ -4,6 +4,184 @@ import { simplifyContour } from '../services/contourSimplify.js';
 
 const router = Router();
 
+function sanitizeAsciiName(input: string): string {
+  const normalized = input.replace(/[^\x20-\x7E]+/g, ' ').replace(/[^A-Za-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return normalized || 'Vehicle Concept';
+}
+
+function isVehicleAnalysisData(data: any): boolean {
+  const sizeClass = String(data?.object?.estimated_size_class || '').toLowerCase();
+  return Boolean(
+    data?.vehicle
+    || data?.vehicle_dimensions
+    || data?.object?.object_type === 'car'
+    || sizeClass.includes('vehicle')
+  );
+}
+
+function findFeatureValue(features: any[], patterns: RegExp[]): number | undefined {
+  for (const feature of features || []) {
+    const name = String(feature?.feature_name || '').toLowerCase();
+    if (feature?.value_mm == null) continue;
+    if (patterns.some(pattern => pattern.test(name))) {
+      return Number(feature.value_mm);
+    }
+  }
+  return undefined;
+}
+
+function extractVehicleParams(data: any): {
+  name: string;
+  lengthMm: number;
+  widthMm: number;
+  heightMm: number;
+  wheelbaseMm: number;
+  wheelDiameterMm: number;
+} {
+  const features = Array.isArray(data?.features) ? data.features : [];
+  const dims = data?.vehicle_dimensions || {};
+  const vehicle = data?.vehicle || {};
+  const rawName = [
+    vehicle.year,
+    vehicle.make,
+    vehicle.model,
+    vehicle.variant,
+  ].filter(Boolean).join(' ') || data?.object?.common_name || 'Vehicle Concept';
+  const name = sanitizeAsciiName(rawName);
+
+  const lengthMm = Number(dims.length_mm || findFeatureValue(features, [/overall length/, /vehicle length/, /car length/]) || 4500);
+  const widthMm = Number(dims.width_mm || findFeatureValue(features, [/overall width/, /vehicle width/, /car width/]) || 1800);
+  const heightMm = Number(dims.height_mm || findFeatureValue(features, [/overall height/, /vehicle height/, /car height/]) || 1500);
+  const wheelbaseMm = Number(dims.wheelbase_mm || findFeatureValue(features, [/wheelbase/]) || lengthMm * 0.58);
+  const wheelDiameterMm = Number(findFeatureValue(features, [/wheel diameter/, /tire diameter/]) || 700);
+
+  return { name, lengthMm, widthMm, heightMm, wheelbaseMm, wheelDiameterMm };
+}
+
+function generateVehicleFallbackFS(data: any): string {
+  const params = extractVehicleParams(data);
+  const bodyHeightRatio = 0.58;
+  const cabinLengthRatio = 0.52;
+  const cabinWidthRatio = 0.82;
+  const roofFrontOffsetRatio = 0.08;
+  const wheelInsetRatio = 0.38;
+
+  return `FeatureScript 2909;
+import(path : "onshape/std/common.fs", version : "2909.0");
+
+annotation { "Feature Type Name" : "${params.name}" }
+export const vehicleConcept = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Length" }
+        isLength(definition.length, { (millimeter) : [1000, ${params.lengthMm}, 10000] } as LengthBoundSpec);
+
+        annotation { "Name" : "Width" }
+        isLength(definition.width, { (millimeter) : [800, ${params.widthMm}, 4000] } as LengthBoundSpec);
+
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (millimeter) : [800, ${params.heightMm}, 4000] } as LengthBoundSpec);
+
+        annotation { "Name" : "Wheelbase" }
+        isLength(definition.wheelbase, { (millimeter) : [1000, ${params.wheelbaseMm}, 7000] } as LengthBoundSpec);
+
+        annotation { "Name" : "Wheel Diameter" }
+        isLength(definition.wheelDiameter, { (millimeter) : [300, ${params.wheelDiameterMm}, 1500] } as LengthBoundSpec);
+    }
+    {
+        // Simplified concept vehicle generated from video analysis.
+        // The body is intentionally blocky/parametric so the user can refine it in Onshape.
+        var bodySketch = newSketchOnPlane(context, id + "bodySketch", {
+            "sketchPlane" : plane(vector(0, 0, 0) * meter, vector(0, 0, 1))
+        });
+
+        skRectangle(bodySketch, "body", {
+            "firstCorner" : vector(-definition.length / 2, -definition.width / 2),
+            "secondCorner" : vector(definition.length / 2, definition.width / 2)
+        });
+        skSolve(bodySketch);
+
+        opExtrude(context, id + "bodyExtrude", {
+            "entities" : qSketchRegion(id + "bodySketch"),
+            "direction" : vector(0, 0, 1),
+            "endBound" : BoundingType.BLIND,
+            "endDepth" : definition.height * ${bodyHeightRatio}
+        });
+
+        var roofSketch = newSketchOnPlane(context, id + "roofSketch", {
+            "sketchPlane" : plane(vector(0, 0, 1) * (definition.height * ${bodyHeightRatio}), vector(0, 0, 1))
+        });
+
+        skRectangle(roofSketch, "roof", {
+            "firstCorner" : vector(-(definition.length * ${cabinLengthRatio}) / 2 + definition.length * ${roofFrontOffsetRatio}, -(definition.width * ${cabinWidthRatio}) / 2),
+            "secondCorner" : vector((definition.length * ${cabinLengthRatio}) / 2 + definition.length * ${roofFrontOffsetRatio}, (definition.width * ${cabinWidthRatio}) / 2)
+        });
+        skSolve(roofSketch);
+
+        opExtrude(context, id + "roofExtrude", {
+            "entities" : qSketchRegion(id + "roofSketch"),
+            "direction" : vector(0, 0, 1),
+            "endBound" : BoundingType.BLIND,
+            "endDepth" : definition.height * ${1 - bodyHeightRatio}
+        });
+
+        // Reference markers for wheel positions.
+        var axleOffset = definition.wheelbase / 2;
+        var wheelInset = definition.width * ${wheelInsetRatio};
+        var wheelRadius = definition.wheelDiameter / 2;
+        var markerSketch = newSketchOnPlane(context, id + "markerSketch", {
+            "sketchPlane" : plane(vector(0, 0, 0) * meter, vector(0, 0, 1))
+        });
+
+        skCircle(markerSketch, "frontLeftWheel", {
+            "center" : vector(-axleOffset, wheelInset),
+            "radius" : wheelRadius
+        });
+        skCircle(markerSketch, "frontRightWheel", {
+            "center" : vector(-axleOffset, -wheelInset),
+            "radius" : wheelRadius
+        });
+        skCircle(markerSketch, "rearLeftWheel", {
+            "center" : vector(axleOffset, wheelInset),
+            "radius" : wheelRadius
+        });
+        skCircle(markerSketch, "rearRightWheel", {
+            "center" : vector(axleOffset, -wheelInset),
+            "radius" : wheelRadius
+        });
+        skSolve(markerSketch);
+    });`;
+}
+
+function buildVehiclePrompt(data: any): string {
+  const params = extractVehicleParams(data);
+  return `You are an Onshape FeatureScript expert. Generate a simplified but usable parametric car concept model.
+
+The source came from vehicle video analysis, not contour tracing.
+Model a clean exterior concept body using official dimensions and visible cues.
+
+Requirements:
+1. Output complete FeatureScript only.
+2. Start with FeatureScript 2909 and common.fs import.
+3. Use ASCII-only Feature Type Name.
+4. Use parameters for length, width, height, wheelbase, and wheel diameter.
+5. Create a simplified vehicle body as 2 or more solids/sketches, not just one plain block.
+6. Add wheel position guide geometry or wheel placeholders using the wheelbase.
+7. Keep the model centered at the origin.
+8. Prefer robust primitives (rectangle, circle, extrude) over fragile operations.
+9. Add short comments explaining body, roof/cabin, and wheel placement.
+
+Preferred vehicle dimensions:
+- length: ${params.lengthMm} mm
+- width: ${params.widthMm} mm
+- height: ${params.heightMm} mm
+- wheelbase: ${params.wheelbaseMm} mm
+- wheel diameter: ${params.wheelDiameterMm} mm
+
+Vehicle analysis result:
+${JSON.stringify(data, null, 2)}`;
+}
+
 // ── Reference FeatureScript (L390 Battery) for few-shot prompting ────────────
 const REFERENCE_FS = `FeatureScript 2909;
 import(path : "onshape/std/common.fs", version : "2909.0");
@@ -146,8 +324,9 @@ router.post('/', async (req, res) => {
 
   // Pre-process: simplify contour if present
   const contour = measurementData.contour_mm || measurementData.photos?.[0]?.contour_mm;
+  const isVehicle = isVehicleAnalysisData(measurementData);
   let geoInfo = '';
-  if (contour && contour.length > 3) {
+  if (!isVehicle && contour && contour.length > 3) {
     const geo = simplifyContour(contour);
     geoInfo = `
 Simplified geometry analysis:
@@ -160,7 +339,9 @@ Use skRectangle for the main body and each tab. Use skCircle for holes.
 For truly irregular shapes use skFitSpline (closed:true) — NOT skPolyline.`;
   }
 
-  const prompt = `You are an Onshape FeatureScript expert. Generate production-ready FeatureScript code.
+  const prompt = isVehicle
+    ? buildVehiclePrompt(measurementData)
+    : `You are an Onshape FeatureScript expert. Generate production-ready FeatureScript code.
 
 REFERENCE EXAMPLE (a laptop battery):
 \`\`\`
@@ -202,7 +383,7 @@ Generate the complete FeatureScript code. Output ONLY code, no explanation.`;
 
     // Fallback: generate basic FeatureScript without AI
     try {
-      const code = generateFallbackFS(measurementData);
+      const code = isVehicle ? generateVehicleFallbackFS(measurementData) : generateFallbackFS(measurementData);
       res.json({ code, method: 'fallback' });
     } catch (fallbackErr: any) {
       res.status(500).json({

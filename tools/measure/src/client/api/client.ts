@@ -117,7 +117,7 @@ export const deleteApiKey = (suffix: string) =>
 
 // FeatureScript generation
 export const generateFeatureScript = (measurementJson: any) =>
-  apiFetch<{ code: string }>('/api/generate-featurescript', {
+  apiFetch<{ code: string; method?: 'gemini' | 'fallback' }>('/api/generate-featurescript', {
     method: 'POST',
     body: JSON.stringify(measurementJson),
   });
