@@ -23,11 +23,14 @@ interface GeminiRequestOptions {
   projectId?: number;
   systemInstruction?: string;
   useGrounding?: boolean;
+  preferredApiKey?: string;
+  avoidApiKeys?: string[];
 }
 
 // Track bad keys with cooldown (key → timestamp when it failed)
 const badKeys = new Map<string, number>();
 const BAD_KEY_COOLDOWN_MS = 5 * 60_000; // 5 min cooldown for failed keys
+const reservedPreferredKeys = new Set<string>();
 
 function isKeyUsable(key: string): boolean {
   const failedAt = badKeys.get(key);
@@ -44,12 +47,32 @@ function markKeyBad(key: string): void {
   console.warn(`[gemini] Key ...${key.slice(-4)} marked bad, cooldown ${BAD_KEY_COOLDOWN_MS / 1000}s`);
 }
 
+export function reservePreferredGeminiKey(extraSkipKeys?: Set<string>): string | undefined {
+  const skipKeys = new Set<string>([...reservedPreferredKeys, ...(extraSkipKeys || [])]);
+  for (const [k, t] of badKeys) {
+    if (Date.now() - t < BAD_KEY_COOLDOWN_MS) skipKeys.add(k);
+  }
+  try {
+    const key = getGeminiApiKey(undefined, skipKeys);
+    if (skipKeys.has(key)) return undefined;
+    reservedPreferredKeys.add(key);
+    return key;
+  } catch {
+    return undefined;
+  }
+}
+
+export function releasePreferredGeminiKey(key?: string): void {
+  if (!key) return;
+  reservedPreferredKeys.delete(key);
+}
+
 /** Call Gemini API with automatic key rotation and retry on failure */
 export async function callGemini(options: GeminiRequestOptions): Promise<{
   text: string;
   usage: GeminiResponse['usageMetadata'];
 }> {
-  const { prompt, imagePaths, callType, projectId, systemInstruction, useGrounding } = options;
+  const { prompt, imagePaths, callType, projectId, systemInstruction, useGrounding, preferredApiKey, avoidApiKeys } = options;
   const model = getGeminiModel();
 
   // Try up to 3 different keys
@@ -58,12 +81,21 @@ export async function callGemini(options: GeminiRequestOptions): Promise<{
 
   // Collect keys to skip (already tried + known bad)
   const skipKeys = new Set<string>();
+  for (const key of reservedPreferredKeys) {
+    if (key !== preferredApiKey) skipKeys.add(key);
+  }
   for (const [k, t] of badKeys) {
     if (Date.now() - t < BAD_KEY_COOLDOWN_MS) skipKeys.add(k);
   }
+  for (const key of avoidApiKeys || []) {
+    if (key) skipKeys.add(key);
+  }
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const key = getGeminiApiKey(undefined, skipKeys);
+    const key = attempt === 0 && preferredApiKey && !skipKeys.has(preferredApiKey) && isKeyUsable(preferredApiKey)
+      ? preferredApiKey
+      : getFreshGeminiKey(skipKeys);
+    if (!key) break;
     if (triedKeys.has(key)) continue; // already tried this exact key
     triedKeys.add(key);
     skipKeys.add(key);
@@ -81,6 +113,15 @@ export async function callGemini(options: GeminiRequestOptions): Promise<{
   }
 
   throw lastErr ?? new Error('All Gemini API keys exhausted');
+}
+
+function getFreshGeminiKey(skipKeys: Set<string>): string | undefined {
+  try {
+    const key = getGeminiApiKey(undefined, skipKeys);
+    return skipKeys.has(key) ? undefined : key;
+  } catch {
+    return undefined;
+  }
 }
 
 async function doGeminiCall(

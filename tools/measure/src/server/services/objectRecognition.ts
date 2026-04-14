@@ -50,6 +50,8 @@ function normalizeEstimatedSizeClass(value: unknown): ObjectIdentification['esti
 export async function identifyObject(
   framePaths: string[],
   projectId?: number,
+  preferredApiKey?: string,
+  avoidApiKeys?: string[],
 ): Promise<ObjectIdentification> {
   // Use at most 5 well-spaced frames for the identification call
   const samplePaths = sampleFrames(framePaths, 5);
@@ -73,6 +75,8 @@ Return only valid JSON, no extra text.`;
     imagePaths: samplePaths,
     callType: 'video_identify_object',
     projectId,
+    preferredApiKey,
+    avoidApiKeys,
   });
 
   const parsed = parseJson<Partial<ObjectIdentification>>(text, {});
@@ -96,6 +100,7 @@ export async function extractFeatures(
   framePaths: string[],
   objectInfo: ObjectIdentification,
   projectId?: number,
+  getBatchKeyAssignment?: (batchIndex: number) => { preferredApiKey?: string; avoidApiKeys?: string[]; release?: () => void },
 ): Promise<ExtractedFeature[]> {
   // Process frames in batches of up to 4 images per Gemini call
   const BATCH = 4;
@@ -103,8 +108,14 @@ export async function extractFeatures(
 
   for (let i = 0; i < framePaths.length; i += BATCH) {
     const batch = framePaths.slice(i, i + BATCH);
-    const features = await extractFeaturesFromBatch(batch, objectInfo, projectId);
-    allFeatures.push(...features);
+    const batchIndex = Math.floor(i / BATCH);
+    const assignment = getBatchKeyAssignment?.(batchIndex);
+    try {
+      const features = await extractFeaturesFromBatch(batch, objectInfo, projectId, assignment?.preferredApiKey, assignment?.avoidApiKeys);
+      allFeatures.push(...features);
+    } finally {
+      assignment?.release?.();
+    }
   }
 
   return mergeFeatures(allFeatures);
@@ -114,6 +125,8 @@ async function extractFeaturesFromBatch(
   framePaths: string[],
   objectInfo: ObjectIdentification,
   projectId?: number,
+  preferredApiKey?: string,
+  avoidApiKeys?: string[],
 ): Promise<ExtractedFeature[]> {
   const prompt = `You are a precision metrology expert analyzing images of: ${objectInfo.common_name} (${objectInfo.object_type}).
 ${objectInfo.description}
@@ -145,6 +158,8 @@ Rules:
     imagePaths: framePaths,
     callType: 'video_extract_features',
     projectId,
+    preferredApiKey,
+    avoidApiKeys,
   });
 
   const parsed = parseJson<Partial<ExtractedFeature>[]>(text, []);
@@ -173,6 +188,8 @@ export async function searchMissingDimensions(
   features: ExtractedFeature[],
   objectInfo: ObjectIdentification,
   projectId?: number,
+  preferredApiKey?: string,
+  avoidApiKeys?: string[],
 ): Promise<ExtractedFeature[]> {
   const missingCount = features.filter(
     (f) => f.value_mm === null || f.confidence === 'low',
@@ -214,6 +231,8 @@ Return only the JSON array, no extra text.`;
     callType: 'video_search_dimensions',
     projectId,
     useGrounding: true,
+    preferredApiKey,
+    avoidApiKeys,
   });
 
   const searchResults = parseJson<Array<{

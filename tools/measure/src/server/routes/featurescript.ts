@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { callGemini } from '../geminiClient.js';
+import { callGemini, releasePreferredGeminiKey, reservePreferredGeminiKey } from '../geminiClient.js';
 import { simplifyContour } from '../services/contourSimplify.js';
 
 const router = Router();
@@ -379,12 +379,20 @@ ${JSON.stringify(measurementData, null, 2)}
 
 Generate the complete FeatureScript code. Output ONLY code, no explanation.`;
 
+  let preferredApiKey: string | undefined;
   try {
+    preferredApiKey = reservePreferredGeminiKey();
+    if (preferredApiKey) {
+      console.log(`[featurescript key] generate-featurescript -> ...${preferredApiKey.slice(-4)}`);
+    }
+
     const result = await callGemini({
       prompt,
       callType: 'featurescript',
       projectId: measurementData.projectId,
+      preferredApiKey,
     });
+    releasePreferredGeminiKey(preferredApiKey);
 
     const code = normalizeFeatureScriptCode(result.text);
     if (!isValidFeatureScriptCode(code)) {
@@ -393,6 +401,7 @@ Generate the complete FeatureScript code. Output ONLY code, no explanation.`;
 
     res.json({ code, method: 'gemini' });
   } catch (err: any) {
+    releasePreferredGeminiKey(preferredApiKey);
     console.error('FeatureScript generation error (Gemini), using fallback:', err.message);
 
     // Fallback: generate basic FeatureScript without AI

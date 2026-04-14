@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 
 import { getDb } from '../db.js';
+import { releasePreferredGeminiKey, reservePreferredGeminiKey } from '../geminiClient.js';
 import { extractFrames, adoptPhotosAsFrames, cleanupJobFrames, FRAMES_BASE_DIR } from '../services/videoService.js';
 import {
   identifyObject,
@@ -24,7 +25,7 @@ import {
   buildAnalysisResult,
 } from '../services/objectRecognition.js';
 import { identifyVehicleFromImages, searchVehicleDimensionsPartial } from '../services/search.js';
-import type { VideoJob, VideoAnalysisResult, VideoAnalysisSSEEvent } from '../../shared/types.js';
+import type { ExtractedFeature, PartialVehicleDimensions, VehicleIdentification, VideoJob, VideoAnalysisResult, VideoAnalysisSSEEvent } from '../../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const VIDEO_UPLOAD_DIR = resolve(__dirname, '../../../data/videos');
@@ -99,6 +100,33 @@ function shouldAttemptVehicleLookup(objectInfo: { object_type: string; common_na
     || haystack.includes('sedan')
     || haystack.includes('truck')
     || haystack.includes('coupe');
+}
+
+function createActionKeyAssigner() {
+  const reserved = new Set<string>();
+  return {
+    reserve(action: string): string | undefined {
+      const key = reservePreferredGeminiKey(reserved);
+      if (key) {
+        reserved.add(key);
+        console.log(`[video keys] ${action} -> ...${key.slice(-4)}`);
+      }
+      return key;
+    },
+    release(key?: string): void {
+      if (!key) return;
+      reserved.delete(key);
+      releasePreferredGeminiKey(key);
+    },
+    probeAvailable(): boolean {
+      const probe = reservePreferredGeminiKey(reserved);
+      if (!probe) return false;
+      reserved.add(probe);
+      reserved.delete(probe);
+      releasePreferredGeminiKey(probe);
+      return true;
+    },
+  };
 }
 
 // ── POST /api/video/upload  (single video) ────────────────────────────────────
@@ -273,6 +301,7 @@ router.delete('/:jobId', (req: Request, res: Response) => {
 
 async function runAnalysis(job: VideoJob): Promise<void> {
   const jobId = job.id;
+  const actionKeys = createActionKeyAssigner();
 
   try {
     // ── Phase 1: Extract frames ──────────────────────────────────────────────
@@ -301,31 +330,98 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     // ── Phase 2: Identify object ─────────────────────────────────────────────
     updateJob(jobId, { status: 'analyzing' });
 
-    const objectInfo = await identifyObject(framePaths);
+    const identifyObjectKey = actionKeys.reserve('identify-object');
+    const objectInfo = await (async () => {
+      try {
+        return await identifyObject(
+          framePaths,
+          undefined,
+          identifyObjectKey,
+        );
+      } finally {
+        actionKeys.release(identifyObjectKey);
+      }
+    })();
     updateJob(jobId, {
       object_type: objectInfo.object_type,
       object_description: objectInfo.description,
     });
 
     // ── Phase 3: Extract features from all frames ────────────────────────────
-    const [rawFeatures, vehicleResult] = await Promise.all([
-      extractFeatures(framePaths, objectInfo),
-      shouldAttemptVehicleLookup(objectInfo)
-        ? identifyVehicleFromImages(framePaths)
-        : Promise.resolve({ found: false } as const),
-    ]);
+    const vehicleKey = shouldAttemptVehicleLookup(objectInfo) ? actionKeys.reserve('identify-vehicle') : undefined;
+    const vehicleAvoid: string[] = [];
+    let rawFeatures: ExtractedFeature[] = [];
+    let vehicleResult: VehicleIdentification | { found: false } = { found: false };
+    try {
+      const canRunVehicleInParallel = Boolean(vehicleKey && actionKeys.probeAvailable());
+      if (canRunVehicleInParallel) {
+        [rawFeatures, vehicleResult] = await Promise.all([
+          extractFeatures(framePaths, objectInfo, undefined, (batchIndex) => {
+            const preferredApiKey = actionKeys.reserve(`extract-features-batch-${batchIndex + 1}`);
+            return {
+              preferredApiKey,
+              avoidApiKeys: [vehicleKey].filter(Boolean) as string[],
+              release: () => actionKeys.release(preferredApiKey),
+            };
+          }),
+          identifyVehicleFromImages(framePaths, undefined, vehicleKey, vehicleAvoid),
+        ]);
+      } else {
+        actionKeys.release(vehicleKey);
+        rawFeatures = await extractFeatures(framePaths, objectInfo, undefined, (batchIndex) => {
+          const preferredApiKey = actionKeys.reserve(`extract-features-batch-${batchIndex + 1}`);
+          return {
+            preferredApiKey,
+            release: () => actionKeys.release(preferredApiKey),
+          };
+        });
+        const sequentialVehicleKey = shouldAttemptVehicleLookup(objectInfo) ? actionKeys.reserve('identify-vehicle-sequential') : undefined;
+        vehicleResult = shouldAttemptVehicleLookup(objectInfo)
+          ? await identifyVehicleFromImages(framePaths, undefined, sequentialVehicleKey, [])
+          : { found: false };
+        actionKeys.release(sequentialVehicleKey);
+      }
+    } finally {
+      actionKeys.release(vehicleKey);
+    }
 
     // ── Phase 4: Web search for missing dimensions ───────────────────────────
     updateJob(jobId, { status: 'searching' });
-    const [enrichedFeatures, vehicleDimensions] = await Promise.all([
-      searchMissingDimensions(rawFeatures, objectInfo),
-      vehicleResult.found
-        ? searchVehicleDimensionsPartial(vehicleResult).catch((err) => {
-            console.warn(`[video] Vehicle dimension lookup skipped: ${err instanceof Error ? err.message : String(err)}`);
-            return undefined;
-          })
-        : Promise.resolve(undefined),
-    ]);
+    const searchDimensionsKey = actionKeys.reserve('search-missing-dimensions');
+    const vehicleDimsKey = vehicleResult.found ? actionKeys.reserve('search-vehicle-dimensions') : undefined;
+    const searchAvoid = [vehicleDimsKey].filter(Boolean) as string[];
+    const vehicleDimsAvoid = [searchDimensionsKey].filter(Boolean) as string[];
+    let enrichedFeatures: ExtractedFeature[] = [];
+    let vehicleDimensions: PartialVehicleDimensions | undefined = undefined;
+    try {
+      const canRunSearchesInParallel = Boolean(vehicleDimsKey && actionKeys.probeAvailable());
+      if (canRunSearchesInParallel) {
+        [enrichedFeatures, vehicleDimensions] = await Promise.all([
+          searchMissingDimensions(rawFeatures, objectInfo, undefined, searchDimensionsKey, searchAvoid),
+          vehicleResult.found
+            ? searchVehicleDimensionsPartial(vehicleResult, undefined, vehicleDimsKey, vehicleDimsAvoid).catch((err) => {
+                console.warn(`[video] Vehicle dimension lookup skipped: ${err instanceof Error ? err.message : String(err)}`);
+                return undefined;
+              })
+            : Promise.resolve(undefined),
+        ]);
+      } else {
+        actionKeys.release(vehicleDimsKey);
+        enrichedFeatures = await searchMissingDimensions(rawFeatures, objectInfo, undefined, searchDimensionsKey, []);
+        actionKeys.release(searchDimensionsKey);
+        const sequentialVehicleDimsKey = vehicleResult.found ? actionKeys.reserve('search-vehicle-dimensions-sequential') : undefined;
+        vehicleDimensions = vehicleResult.found
+          ? await searchVehicleDimensionsPartial(vehicleResult, undefined, sequentialVehicleDimsKey, []).catch((err) => {
+              console.warn(`[video] Vehicle dimension lookup skipped: ${err instanceof Error ? err.message : String(err)}`);
+              return undefined;
+            })
+          : undefined;
+        actionKeys.release(sequentialVehicleDimsKey);
+      }
+    } finally {
+      actionKeys.release(searchDimensionsKey);
+      actionKeys.release(vehicleDimsKey);
+    }
 
     // ── Phase 5: Save result ─────────────────────────────────────────────────
     const result = buildAnalysisResult(

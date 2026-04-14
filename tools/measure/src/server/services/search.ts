@@ -144,12 +144,16 @@ Do NOT fill in approximate or default values.`;
 export async function identifyVehicle(
   imagePath: string,
   projectId?: number,
+  preferredApiKey?: string,
+  avoidApiKeys?: string[],
 ): Promise<VehicleIdentification | { found: false }> {
   const { text } = await callGemini({
     prompt: VEHICLE_IDENTIFY_PROMPT,
     imagePaths: [imagePath],
     callType: 'vehicle-identify',
     projectId,
+    preferredApiKey,
+    avoidApiKeys,
   });
 
   const parsed = parseJsonFromText(text);
@@ -172,11 +176,13 @@ export async function identifyVehicle(
 export async function identifyVehicleFromImages(
   imagePaths: string[],
   projectId?: number,
+  preferredApiKey?: string,
+  avoidApiKeys?: string[],
 ): Promise<VehicleIdentification | { found: false }> {
   const samples = sampleImages(imagePaths, 5);
   for (const imagePath of samples) {
     try {
-      const result = await identifyVehicle(imagePath, projectId);
+      const result = await identifyVehicle(imagePath, projectId, preferredApiKey, avoidApiKeys);
       if (result.found) return result;
     } catch (err) {
       console.warn(`[vehicle-identify] failed for ${imagePath}:`, err);
@@ -192,6 +198,8 @@ export async function identifyVehicleFromImages(
 export async function searchVehicleDimensions(
   vehicle: VehicleIdentification,
   projectId?: number,
+  preferredApiKey?: string,
+  avoidApiKeys?: string[],
 ): Promise<VehicleDimensions> {
   const yearPrefix = vehicle.year ? `${vehicle.year} ` : '';
   const variantSuffix = vehicle.variant ? ` ${vehicle.variant}` : '';
@@ -206,6 +214,8 @@ export async function searchVehicleDimensions(
     callType: 'vehicle-dims-search',
     projectId,
     useGrounding: true,
+    preferredApiKey,
+    avoidApiKeys,
   });
 
   const parsed = parseJsonFromText(text);
@@ -239,6 +249,8 @@ export async function searchVehicleDimensions(
 export async function searchVehicleDimensionsPartial(
   vehicle: VehicleIdentification,
   projectId?: number,
+  preferredApiKey?: string,
+  avoidApiKeys?: string[],
 ): Promise<PartialVehicleDimensions> {
   const yearPrefix = vehicle.year ? `${vehicle.year} ` : '';
   const variantSuffix = vehicle.variant ? ` ${vehicle.variant}` : '';
@@ -253,6 +265,8 @@ export async function searchVehicleDimensionsPartial(
     callType: 'vehicle-dims-search',
     projectId,
     useGrounding: true,
+    preferredApiKey,
+    avoidApiKeys,
   });
 
   const parsed = parseJsonFromText(text);
