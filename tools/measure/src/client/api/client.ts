@@ -121,3 +121,8 @@ export const generateFeatureScript = (measurementJson: any) =>
     method: 'POST',
     body: JSON.stringify(measurementJson),
   });
+
+export const restartVideoAnalysis = (jobId: string) =>
+  apiFetch<{ message: string }>(`/api/video/${jobId}/analyze`, {
+    method: 'POST',
+  });

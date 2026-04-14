@@ -1,30 +1,72 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import VideoUploader from './components/VideoUploader';
 import AnalysisProgress from './components/AnalysisProgress';
 import FeatureList from './components/FeatureList';
 import type { VideoAnalysisResult } from '@shared/types';
+import { restartVideoAnalysis } from '../api/client';
 
 type Step = 'upload' | 'analyzing' | 'done';
+
+function isAlreadyRunningError(message: string): boolean {
+  return /already in status/i.test(message || '');
+}
 
 export default function App() {
   const [step, setStep] = useState<Step>('upload');
   const [jobId, setJobId] = useState<string | null>(null);
   const [result, setResult] = useState<VideoAnalysisResult | null>(null);
+  const [analysisNotice, setAnalysisNotice] = useState<string | null>(null);
+  const [retryingAnalysis, setRetryingAnalysis] = useState(false);
+  const retryTokenRef = useRef(0);
 
   function handleUploaded(id: string) {
+    retryTokenRef.current += 1;
+    setRetryingAnalysis(false);
     setJobId(id);
+    setAnalysisNotice(null);
     setStep('analyzing');
   }
 
-  function handleDone(r: VideoAnalysisResult) {
+  function handleDone(r: VideoAnalysisResult, notice?: string) {
     setResult(r);
+    setAnalysisNotice(notice || null);
     setStep('done');
   }
 
   function handleReset() {
+    retryTokenRef.current += 1;
+    setRetryingAnalysis(false);
     setStep('upload');
     setJobId(null);
     setResult(null);
+    setAnalysisNotice(null);
+  }
+
+  async function handleRetry() {
+    if (!jobId || retryingAnalysis) return;
+    const token = ++retryTokenRef.current;
+    setRetryingAnalysis(true);
+    try {
+      await restartVideoAnalysis(jobId);
+      if (token !== retryTokenRef.current) return;
+      setResult(null);
+      setAnalysisNotice(null);
+      setStep('analyzing');
+    } catch (err: any) {
+      if (token !== retryTokenRef.current) return;
+      const message = err?.message || '重新啟動分析失敗';
+      if (isAlreadyRunningError(message)) {
+        setResult(null);
+        setAnalysisNotice(null);
+        setStep('analyzing');
+      } else {
+        setAnalysisNotice(message);
+      }
+    } finally {
+      if (token === retryTokenRef.current) {
+        setRetryingAnalysis(false);
+      }
+    }
   }
 
   return (
@@ -56,10 +98,10 @@ export default function App() {
           <VideoUploader onUploaded={handleUploaded} />
         )}
         {step === 'analyzing' && jobId && (
-          <AnalysisProgress jobId={jobId} onDone={handleDone} onError={handleReset} />
+          <AnalysisProgress jobId={jobId} onDone={handleDone} onReset={handleReset} />
         )}
         {step === 'done' && result && (
-          <FeatureList result={result} onReset={handleReset} />
+          <FeatureList result={result} onReset={handleReset} onRetry={jobId ? handleRetry : undefined} retrying={retryingAnalysis} notice={analysisNotice} />
         )}
       </main>
     </div>

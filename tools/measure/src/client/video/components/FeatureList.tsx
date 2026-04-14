@@ -5,6 +5,9 @@ import { generateFeatureScript } from '../../api/client';
 interface Props {
   result: VideoAnalysisResult;
   onReset: () => void;
+  onRetry?: () => void | Promise<void>;
+  retrying?: boolean;
+  notice?: string | null;
 }
 
 type SortKey = 'feature_name' | 'value_mm' | 'confidence' | 'feature_type';
@@ -36,7 +39,7 @@ const VIEW_ANGLE_LABEL: Record<string, string> = {
   unknown: '未知',
 };
 
-export default function FeatureList({ result, onReset }: Props) {
+export default function FeatureList({ result, onReset, onRetry, retrying = false, notice }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('feature_name');
   const [sortAsc, setSortAsc] = useState(true);
   const [filterConf, setFilterConf] = useState<FilterConf>('all');
@@ -150,6 +153,19 @@ export default function FeatureList({ result, onReset }: Props) {
 
   return (
     <div className="space-y-5">
+      {notice && (
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'rgba(210,153,34,0.12)', border: '1px solid rgba(210,153,34,0.3)', color: '#e3b341' }}>
+          {notice}
+          {onRetry && (
+            <div className="mt-3">
+              <button onClick={() => void onRetry()} disabled={retrying} className="rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed" style={{ background: '#1f6feb', color: '#fff' }}>
+                {retrying ? '重試中…' : '繼續重試'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {result.vehicle && (
         <div className="rounded-xl p-4 space-y-3" style={{ background: 'rgba(31,111,235,0.08)', border: '1px solid rgba(31,111,235,0.25)' }}>
           <div className="flex items-start justify-between gap-4">

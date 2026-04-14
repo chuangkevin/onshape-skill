@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { VideoAnalysisResult, VideoJobStatus, ObjectIdentification, ExtractedFeature } from '@shared/types';
+import { restartVideoAnalysis } from '../../api/client';
 
 interface Props {
   jobId: string;
-  onDone: (result: VideoAnalysisResult) => void;
-  onError: () => void;
+  onDone: (result: VideoAnalysisResult, notice?: string) => void;
+  onReset: () => void;
 }
 
 interface ProgressState {
@@ -28,7 +29,11 @@ function stepIndex(status: VideoJobStatus): number {
   return STATUS_ORDER.indexOf(status);
 }
 
-export default function AnalysisProgress({ jobId, onDone, onError }: Props) {
+function isAlreadyRunningError(message: string): boolean {
+  return /already in status/i.test(message || '');
+}
+
+export default function AnalysisProgress({ jobId, onDone, onReset }: Props) {
   const [state, setState] = useState<ProgressState>({
     status: 'queued',
     message: '等待中…',
@@ -37,12 +42,45 @@ export default function AnalysisProgress({ jobId, onDone, onError }: Props) {
     featureCount: 0,
   });
   const esRef = useRef<EventSource | null>(null);
+  const mountedRef = useRef(true);
+  const retryTokenRef = useRef(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
-  useEffect(() => {
-    const es = new EventSource(`/api/video/${jobId}/stream`);
-    esRef.current = es;
+  async function retryAnalysis() {
+    setRetrying(true);
+    setErrorMessage(null);
+    const token = ++retryTokenRef.current;
+    try {
+      await restartVideoAnalysis(jobId);
+      if (!mountedRef.current || token !== retryTokenRef.current) return;
+      setState((s) => ({ ...s, status: 'analyzing', message: '重新啟動 Gemini 分析…' }));
+      esRef.current?.close();
+      const es = new EventSource(`/api/video/${jobId}/stream`);
+      esRef.current = es;
+      bindEventSource(es);
+    } catch (err: any) {
+      if (!mountedRef.current || token !== retryTokenRef.current) return;
+      const message = err?.message || '重新啟動分析失敗';
+      if (isAlreadyRunningError(message)) {
+        setState((s) => ({ ...s, status: 'analyzing', message: '重新接上進行中的分析…' }));
+        esRef.current?.close();
+        const es = new EventSource(`/api/video/${jobId}/stream`);
+        esRef.current = es;
+        bindEventSource(es);
+      } else {
+        setErrorMessage(message);
+      }
+    } finally {
+      if (mountedRef.current && token === retryTokenRef.current) {
+        setRetrying(false);
+      }
+    }
+  }
 
+  function bindEventSource(es: EventSource) {
     es.onmessage = (e) => {
+      if (!mountedRef.current) return;
       try {
         const event = JSON.parse(e.data);
         switch (event.type) {
@@ -65,18 +103,35 @@ export default function AnalysisProgress({ jobId, onDone, onError }: Props) {
           case 'error':
             es.close();
             console.error('[video stream] error:', event.message);
-            onError();
+            if (event.result) {
+              onDone(event.result as VideoAnalysisResult, `分析未完全成功：${event.message}`);
+            } else {
+              setState((s) => ({ ...s, status: 'error', message: event.message }));
+              setErrorMessage(event.message);
+            }
             break;
         }
       } catch {}
     };
 
     es.onerror = () => {
-      es.close();
+      if (!mountedRef.current) return;
+      setState((s) => ({ ...s, message: '連線中斷，重新連線中…' }));
     };
+  }
 
-    return () => es.close();
-  }, [jobId, onDone, onError]);
+  useEffect(() => {
+    mountedRef.current = true;
+    const es = new EventSource(`/api/video/${jobId}/stream`);
+    esRef.current = es;
+    bindEventSource(es);
+
+    return () => {
+      mountedRef.current = false;
+      retryTokenRef.current += 1;
+      esRef.current?.close();
+    };
+  }, [jobId, onDone]);
 
   const currentIdx = stepIndex(state.status);
 
@@ -132,6 +187,21 @@ export default function AnalysisProgress({ jobId, onDone, onError }: Props) {
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>製造商：{state.object.manufacturer}</p>
           )}
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{state.object.description}</p>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="rounded-xl p-4 space-y-3" style={{ background: 'rgba(248,81,73,0.10)', border: '1px solid rgba(248,81,73,0.30)' }}>
+          <p className="font-semibold" style={{ color: 'var(--error)' }}>分析失敗</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{errorMessage}</p>
+          <div className="flex gap-2">
+            <button onClick={retryAnalysis} disabled={retrying} className="rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-60" style={{ background: '#1f6feb', color: '#fff' }}>
+              {retrying ? '重試中…' : '重試分析'}
+            </button>
+            <button onClick={onReset} className="rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+              重新上傳
+            </button>
+          </div>
         </div>
       )}
     </div>

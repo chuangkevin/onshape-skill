@@ -101,6 +101,7 @@ export async function extractFeatures(
   objectInfo: ObjectIdentification,
   projectId?: number,
   getBatchKeyAssignment?: (batchIndex: number) => { preferredApiKey?: string; avoidApiKeys?: string[]; release?: () => void },
+  onBatchComplete?: (features: ExtractedFeature[]) => void,
 ): Promise<ExtractedFeature[]> {
   // Process frames in batches of up to 4 images per Gemini call
   const BATCH = 4;
@@ -113,6 +114,7 @@ export async function extractFeatures(
     try {
       const features = await extractFeaturesFromBatch(batch, objectInfo, projectId, assignment?.preferredApiKey, assignment?.avoidApiKeys);
       allFeatures.push(...features);
+      onBatchComplete?.(mergeFeatures(allFeatures));
     } finally {
       assignment?.release?.();
     }

@@ -44,6 +44,7 @@ export async function extractFrames(
   fps: number = 1,
   maxFrames: number = 30,
 ): Promise<ExtractFramesResult> {
+  cleanupJobFrames(jobId);
   const outDir = getJobFramesDir(jobId);
   const outputPattern = join(outDir, 'frame_%04d.jpg');
 
@@ -69,6 +70,7 @@ export async function extractFrames(
  * Used when the user uploads photos instead of a video.
  */
 export function adoptPhotosAsFrames(photoPaths: string[], jobId: string): string[] {
+  cleanupJobFrames(jobId);
   const outDir = getJobFramesDir(jobId);
   return photoPaths.map((src, i) => {
     const ext = src.split('.').pop() ?? 'jpg';

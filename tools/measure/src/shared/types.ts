@@ -246,7 +246,7 @@ export type VideoAnalysisSSEEvent =
   | { type: 'object'; object: ObjectIdentification }
   | { type: 'features'; features: ExtractedFeature[] }
   | { type: 'done'; result: VideoAnalysisResult }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; result?: VideoAnalysisResult };
 
 // ── Vehicle identification ──
 export interface VehicleIdentification {
