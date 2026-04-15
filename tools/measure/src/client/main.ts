@@ -779,15 +779,27 @@ let lastAnalysisRaw: any = null;
 function getVehiclePreviewData(): { contour_mm: { x: number; y: number }[]; thickness_mm: number; dims: { label: string; value_mm: number }[] } | null {
   const confirmed = getConfirmedExportData();
   const source = lastAnalysisRaw?.result || {};
+  const vehicleItems = confirmedItems.filter((item) => item.key.startsWith('vehicle_') && !item.key.startsWith('vehicle_dim_'));
+  const confirmedVehicleItems = vehicleItems.filter((item) => item.confirmed);
   const vehicleDimItems = confirmedItems.filter((item) => item.key.startsWith('vehicle_dim_'));
   const confirmedVehicleDimItems = vehicleDimItems.filter((item) => item.confirmed);
+  const vehicleIdentity = vehicleItems.length > 0
+    ? (confirmedVehicleItems.length > 0 ? (confirmed.vehicle || {}) : {})
+    : (confirmed.vehicle || source.vehicle || source.ai?.vehicle || {});
   const rawVehicleDimensions = vehicleDimItems.length > 0
     ? (confirmedVehicleDimItems.length > 0 ? (confirmed.vehicle_dimensions || {}) : {})
     : (confirmed.vehicle_dimensions || source.vehicle_dimensions || source.ai?.vehicle_dimensions || {});
-  const length = Number(rawVehicleDimensions.length_mm);
-  const width = Number(rawVehicleDimensions.width_mm);
-  const height = Number(rawVehicleDimensions.height_mm || 1400);
+  const hasEstimatedFallback = !rawVehicleDimensions.length_mm || !rawVehicleDimensions.width_mm;
+  const hasConfirmedVehicleIdentity = vehicleItems.length === 0 || confirmedVehicleItems.length > 0;
+  if (!hasConfirmedVehicleIdentity && (!rawVehicleDimensions.length_mm || !rawVehicleDimensions.width_mm)) {
+    return null;
+  }
+
+  const length = Number(rawVehicleDimensions.length_mm || 4500);
+  const width = Number(rawVehicleDimensions.width_mm || 1800);
+  const height = Number(rawVehicleDimensions.height_mm || 1500);
   if (!length || !width) return null;
+  if (hasEstimatedFallback && Object.keys(vehicleIdentity).length === 0) return null;
 
   const contour_mm = [
     { x: -length / 2, y: -width / 2 },
@@ -796,10 +808,11 @@ function getVehiclePreviewData(): { contour_mm: { x: number; y: number }[]; thic
     { x: -length / 2, y: width / 2 },
   ];
   const dims = [
-    { label: '車長', value_mm: length },
-    { label: '車寬', value_mm: width },
+    { label: rawVehicleDimensions.length_mm ? '車長' : '車長(估算)', value_mm: length },
+    { label: rawVehicleDimensions.width_mm ? '車寬' : '車寬(估算)', value_mm: width },
   ];
   if (rawVehicleDimensions.height_mm) dims.push({ label: '車高', value_mm: Number(rawVehicleDimensions.height_mm) });
+  else if (Object.keys(vehicleIdentity).length > 0) dims.push({ label: '車高(估算)', value_mm: height });
   if (rawVehicleDimensions.wheelbase_mm) dims.push({ label: '軸距', value_mm: Number(rawVehicleDimensions.wheelbase_mm) });
   return { contour_mm, thickness_mm: height, dims };
 }
