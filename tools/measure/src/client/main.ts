@@ -1178,7 +1178,7 @@ function setupEvents(): void {
     const contour = drawings.find(d => d.type === 'polyline' && d.closed && !d.id.startsWith('roi_'));
     if (!contour && !vehiclePreview) { alert(`找不到輪廓。drawings: ${drawings.map(d => d.id).join(', ')}`); return; }
 
-    const scale = photo.scale?.px_per_mm || 1;
+    const scale = photo?.scale?.px_per_mm || 1;
     const pts = (contour as any).points_px as {x:number;y:number}[] || [];
     if (contour && pts.length < 3 && !vehiclePreview) { alert(`輪廓點數不足: ${pts.length}`); return; }
 
@@ -1187,7 +1187,7 @@ function setupEvents(): void {
       : vehiclePreview!.contour_mm;
 
     // Get features (holes) — HoleTool stores center/radius inside f.shape
-    const features = (photo.features || [])
+    const features = ((photo?.features) || [])
       .filter((f: any) => f.type === 'hole' && (f.shape?.center_px || f.center_px))
       .map((f: any) => {
         const center = f.shape?.center_px || f.center_px;
