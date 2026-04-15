@@ -1170,12 +1170,13 @@ function setupEvents(): void {
 
   previewCadBtn.addEventListener('click', async () => {
     const photo = store.getActivePhoto();
+    const drawings = photo?.drawings || [];
     const vehiclePreview = getVehiclePreviewData();
-    if (!photo?.drawings?.length && !vehiclePreview) { alert('無繪圖資料'); return; }
+    if (drawings.length === 0 && !vehiclePreview) { alert('無繪圖資料'); return; }
 
     // Get contour in mm
-    const contour = photo.drawings.find(d => d.type === 'polyline' && d.closed && !d.id.startsWith('roi_'));
-    if (!contour && !vehiclePreview) { alert(`找不到輪廓。drawings: ${photo.drawings.map(d => d.id).join(', ')}`); return; }
+    const contour = drawings.find(d => d.type === 'polyline' && d.closed && !d.id.startsWith('roi_'));
+    if (!contour && !vehiclePreview) { alert(`找不到輪廓。drawings: ${drawings.map(d => d.id).join(', ')}`); return; }
 
     const scale = photo.scale?.px_per_mm || 1;
     const pts = (contour as any).points_px as {x:number;y:number}[] || [];
