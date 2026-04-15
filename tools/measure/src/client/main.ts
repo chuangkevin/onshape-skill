@@ -1192,7 +1192,7 @@ function setupEvents(): void {
     if (!contour && !vehiclePreview) { alert(`找不到輪廓。drawings: ${drawings.map(d => d.id).join(', ')}`); return; }
 
     const scale = photo?.scale?.px_per_mm || 1;
-    const pts = (contour as any).points_px as {x:number;y:number}[] || [];
+    const pts = contour ? (((contour as any).points_px as {x:number;y:number}[]) || []) : [];
     if (contour && pts.length < 3 && !vehiclePreview) { alert(`輪廓點數不足: ${pts.length}`); return; }
 
     const contour_mm = contour
