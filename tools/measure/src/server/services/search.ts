@@ -196,6 +196,10 @@ export async function identifyVehicleFromImages(
   return { found: false };
 }
 
+export function sampleVehicleImages(paths: string[], count: number = 5): string[] {
+  return sampleImages(paths, count);
+}
+
 /**
  * Use Gemini with Google Search grounding to find official vehicle dimensions.
  * Throws an error if specs cannot be found — no fallback to default values.
@@ -257,6 +261,7 @@ export async function searchVehicleDimensionsPartial(
   projectId?: number,
   preferredApiKey?: string,
   apiKeyOverride?: string,
+  requestedFields?: Array<keyof PartialVehicleDimensions>,
 ): Promise<PartialVehicleDimensions> {
   const yearPrefix = vehicle.year ? `${vehicle.year} ` : '';
   const variantSuffix = vehicle.variant ? ` ${vehicle.variant}` : '';
@@ -264,7 +269,12 @@ export async function searchVehicleDimensionsPartial(
     .replace('{year}', yearPrefix)
     .replace('{make}', vehicle.make)
     .replace('{model}', vehicle.model)
-    .replace('{variant}', variantSuffix);
+    .replace('{variant}', variantSuffix)
+    + (requestedFields && requestedFields.length > 0
+      ? `
+
+Only return these fields if confirmed: ${requestedFields.join(', ')}`
+      : '');
 
   const request = {
     prompt,

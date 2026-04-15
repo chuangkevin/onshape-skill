@@ -206,6 +206,19 @@ export async function searchMissingDimensions(
     .map((f) => f.feature_name)
     .join(', ');
 
+  return searchMissingDimensionsChunk(features, missingNames, objectInfo, projectId, preferredApiKey, apiKeyOverride);
+}
+
+export async function searchMissingDimensionsChunk(
+  features: ExtractedFeature[],
+  missingNames: string,
+  objectInfo: ObjectIdentification,
+  projectId?: number,
+  preferredApiKey?: string,
+  apiKeyOverride?: string,
+): Promise<ExtractedFeature[]> {
+  if (!missingNames.trim()) return features;
+
   const modelRef = objectInfo.model_number
     ? ` (model: ${objectInfo.model_number})`
     : '';
@@ -322,4 +335,15 @@ export function mergeFeatures(features: ExtractedFeature[]): ExtractedFeature[] 
   }
 
   return Array.from(map.values());
+}
+
+export function mergeFeatureUpdates(
+  base: ExtractedFeature[],
+  updates: ExtractedFeature[],
+): ExtractedFeature[] {
+  const updateMap = new Map(updates.map((feature) => [feature.feature_name.toLowerCase().trim(), feature]));
+  return base.map((feature) => {
+    const incoming = updateMap.get(feature.feature_name.toLowerCase().trim());
+    return incoming ?? feature;
+  });
 }

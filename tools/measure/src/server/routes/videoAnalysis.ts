@@ -22,11 +22,12 @@ import { extractFrames, adoptPhotosAsFrames, cleanupJobFrames, FRAMES_BASE_DIR }
 import {
   identifyObject,
   extractFeaturesBatch,
+  mergeFeatureUpdates,
   mergeFeatures,
-  searchMissingDimensions,
+  searchMissingDimensionsChunk,
   buildAnalysisResult,
 } from '../services/objectRecognition.js';
-import { identifyVehicleFromImages, searchVehicleDimensionsPartial } from '../services/search.js';
+import { identifyVehicle, sampleVehicleImages, searchVehicleDimensionsPartial } from '../services/search.js';
 import type { ExtractedFeature, ObjectIdentification, PartialVehicleDimensions, VehicleIdentification, VideoJob, VideoAnalysisResult, VideoAnalysisSSEEvent } from '../../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -187,7 +188,12 @@ function mergeVehicleDimensions(
 async function runPlannedGeminiSteps<T>(
   steps: RunnableStep<T>[],
   onStepComplete?: (value: T, index: number, meta: StepExecutionResult<T>['metadata']) => Promise<void> | void,
-  options: { parallel?: boolean; softErrorStepIds?: string[]; onSoftError?: (error: unknown, index: number) => Promise<void> | void } = {},
+  options: {
+    parallel?: boolean;
+    softErrorStepIds?: string[];
+    onSoftError?: (error: unknown, index: number) => Promise<void> | void;
+    stopOnValue?: (value: T, index: number) => boolean;
+  } = {},
 ): Promise<T[]> {
   if (steps.length === 0) return [];
 
@@ -276,6 +282,9 @@ async function runPlannedGeminiSteps<T>(
       console.warn(`[video step] ${step.name} -> ...${result.metadata.keyUsed.slice(-4)}${result.metadata.sharedFallbackUsed ? ' (shared)' : ''}`);
       results[index] = result.value;
       await onStepComplete?.(result.value, index, result.metadata);
+      if (options.stopOnValue?.(result.value, index)) {
+        break;
+      }
     } catch (error) {
       if (options.softErrorStepIds?.includes(step.id)) {
         await options.onSoftError?.(error, index);
@@ -575,44 +584,59 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     const needsFeatureExtraction = !featureExtractionComplete;
     const needsVehicleLookup = shouldAttemptVehicleLookup(objectInfo) && !partialVehicle;
     const featureBatchSize = 4;
-    const phase3Steps: RunnableStep<unknown>[] = [];
-
     if (needsFeatureExtraction) {
+      const featureSteps: RunnableStep<unknown>[] = [];
       for (let i = 0; i < framePaths.length; i += featureBatchSize) {
         const batch = framePaths.slice(i, i + featureBatchSize);
         const batchIndex = Math.floor(i / featureBatchSize);
-        phase3Steps.push({
+        featureSteps.push({
           id: `extract-features-batch-${batchIndex + 1}`,
           name: `extract-features-batch-${batchIndex + 1}`,
           allowSharedFallback: true,
           run: (apiKey) => extractFeaturesBatch(batch, objectInfo, undefined, undefined, apiKey),
         });
       }
+      await runPlannedGeminiSteps(featureSteps, async (value, index) => {
+        const step = featureSteps[index];
+        rawFeatures = mergeFeatures([...rawFeatures, ...(value as ExtractedFeature[])]);
+        partialFeatures = rawFeatures;
+        writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+          featureExtractionComplete,
+          vehicleDimensionSearchComplete,
+        });
+      }, { parallel: true });
     }
 
     if (needsVehicleLookup) {
-      phase3Steps.push({
-        id: 'identify-vehicle',
-        name: 'identify-vehicle',
+      const vehicleSampleFrames = sampleVehicleImages(framePaths, 5);
+      const vehicleSteps: RunnableStep<unknown>[] = vehicleSampleFrames.map((imagePath, index) => ({
+        id: `identify-vehicle-frame-${index + 1}`,
+        name: `identify-vehicle-frame-${index + 1}`,
         allowSharedFallback: true,
-        run: (apiKey) => identifyVehicleFromImages(framePaths, undefined, undefined, apiKey),
-      });
-    }
-
-    await runPlannedGeminiSteps(phase3Steps, async (value, index) => {
-      const step = phase3Steps[index];
-      if (step.id.startsWith('extract-features-batch-')) {
-        rawFeatures = mergeFeatures([...rawFeatures, ...(value as ExtractedFeature[])]);
-        partialFeatures = rawFeatures;
-      } else if (step.id === 'identify-vehicle') {
+        run: (apiKey) => identifyVehicle(imagePath, undefined, undefined, apiKey),
+      }));
+      let vehicleFrameSoftErrors = 0;
+      let vehicleFrameResponses = 0;
+      await runPlannedGeminiSteps(vehicleSteps, async (value) => {
+        vehicleFrameResponses += 1;
         vehicleResult = value as VehicleIdentification | { found: false };
         partialVehicle = vehicleResult.found ? vehicleResult : partialVehicle;
-      }
-      writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-        featureExtractionComplete,
-        vehicleDimensionSearchComplete,
+        writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+          featureExtractionComplete,
+          vehicleDimensionSearchComplete,
+        });
+      }, {
+        stopOnValue: (value) => Boolean((value as VehicleIdentification | { found: false }).found),
+        softErrorStepIds: vehicleSteps.map((step) => step.id),
+        onSoftError: async (error, index) => {
+          vehicleFrameSoftErrors += 1;
+          console.warn(`[video] Vehicle frame lookup skipped for ${vehicleSteps[index].id}: ${error instanceof Error ? error.message : String(error)}`);
+        },
       });
-    }, { parallel: true });
+      if (!partialVehicle && vehicleFrameResponses === 0 && vehicleFrameSoftErrors === vehicleSteps.length && vehicleSteps.length > 0) {
+        throw new Error('Vehicle identification failed across all sampled frames');
+      }
+    }
 
     if (needsFeatureExtraction) {
       rawFeatures = partialFeatures;
@@ -634,44 +658,60 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     const needsVehicleDimensionSearch = vehicleResult.found && !vehicleDimensionSearchComplete;
     let enrichedFeatures: ExtractedFeature[] = rawFeatures;
     let vehicleDimensions: PartialVehicleDimensions | undefined = partialVehicleDimensions;
-    const phase4Steps: RunnableStep<unknown>[] = [];
     if (needsFeatureSearch) {
-      phase4Steps.push({
-        id: 'search-missing-dimensions',
-        name: 'search-missing-dimensions',
-        allowSharedFallback: true,
-        run: (apiKey) => searchMissingDimensions(rawFeatures, objectInfo, undefined, undefined, apiKey),
-      });
-    }
-    if (needsVehicleDimensionSearch) {
-      phase4Steps.push({
-        id: 'search-vehicle-dimensions',
-        name: 'search-vehicle-dimensions',
-        allowSharedFallback: true,
-        run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey),
-      });
+      const missingFeatures = rawFeatures.filter((f) => f.value_mm === null || f.confidence === 'low');
+      const chunkSize = 4;
+      const featureSearchSteps: RunnableStep<unknown>[] = [];
+      for (let i = 0; i < missingFeatures.length; i += chunkSize) {
+        const chunk = missingFeatures.slice(i, i + chunkSize);
+        const missingNames = chunk.map((f) => f.feature_name).join(', ');
+        featureSearchSteps.push({
+          id: `search-missing-dimensions-chunk-${Math.floor(i / chunkSize) + 1}`,
+          name: `search-missing-dimensions-chunk-${Math.floor(i / chunkSize) + 1}`,
+          allowSharedFallback: true,
+          run: (apiKey) => searchMissingDimensionsChunk(chunk, missingNames, objectInfo, undefined, undefined, apiKey),
+        });
+      }
+      await runPlannedGeminiSteps(featureSearchSteps, async (value) => {
+        enrichedFeatures = mergeFeatureUpdates(enrichedFeatures, value as ExtractedFeature[]);
+        partialFeatures = enrichedFeatures;
+        writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+          featureExtractionComplete,
+          vehicleDimensionSearchComplete,
+        });
+      }, { parallel: true });
     }
 
-    await runPlannedGeminiSteps(phase4Steps, async (value, index) => {
-      const step = phase4Steps[index];
-      if (step.id === 'search-missing-dimensions') {
-        enrichedFeatures = value as ExtractedFeature[];
-        partialFeatures = enrichedFeatures;
-      } else if (step.id === 'search-vehicle-dimensions') {
+    if (needsVehicleDimensionSearch) {
+      const vehicleDimensionSteps: RunnableStep<unknown>[] = [
+        {
+          id: 'search-vehicle-dimensions-core',
+          name: 'search-vehicle-dimensions-core',
+          allowSharedFallback: true,
+          run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey, ['length_mm', 'width_mm', 'height_mm', 'wheelbase_mm']),
+        },
+        {
+          id: 'search-vehicle-dimensions-track',
+          name: 'search-vehicle-dimensions-track',
+          allowSharedFallback: true,
+          run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey, ['front_track_mm', 'rear_track_mm']),
+        },
+      ];
+      await runPlannedGeminiSteps(vehicleDimensionSteps, async (value) => {
         vehicleDimensions = mergeVehicleDimensions(partialVehicleDimensions, value as PartialVehicleDimensions | undefined);
         partialVehicleDimensions = vehicleDimensions;
-      }
-      writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-        featureExtractionComplete,
-        vehicleDimensionSearchComplete,
+        writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+          featureExtractionComplete,
+          vehicleDimensionSearchComplete,
+        });
+      }, {
+        parallel: true,
+        softErrorStepIds: vehicleDimensionSteps.map((step) => step.id),
+        onSoftError: async (error) => {
+          console.warn(`[video] Vehicle dimension lookup skipped after retries: ${error instanceof Error ? error.message : String(error)}`);
+        },
       });
-    }, {
-      parallel: true,
-      softErrorStepIds: ['search-vehicle-dimensions'],
-      onSoftError: async (error) => {
-        console.warn(`[video] Vehicle dimension lookup skipped after retries: ${error instanceof Error ? error.message : String(error)}`);
-      },
-    });
+    }
 
     if (needsFeatureSearch) {
       rawFeatures = enrichedFeatures;
