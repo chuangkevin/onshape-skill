@@ -776,6 +776,34 @@ interface ConfirmedItem {
 let confirmedItems: ConfirmedItem[] = [];
 let lastAnalysisRaw: any = null;
 
+function getVehiclePreviewData(): { contour_mm: { x: number; y: number }[]; thickness_mm: number; dims: { label: string; value_mm: number }[] } | null {
+  const confirmed = getConfirmedExportData();
+  const source = lastAnalysisRaw?.result || {};
+  const vehicleDimItems = confirmedItems.filter((item) => item.key.startsWith('vehicle_dim_'));
+  const confirmedVehicleDimItems = vehicleDimItems.filter((item) => item.confirmed);
+  const rawVehicleDimensions = vehicleDimItems.length > 0
+    ? (confirmedVehicleDimItems.length > 0 ? (confirmed.vehicle_dimensions || {}) : {})
+    : (confirmed.vehicle_dimensions || source.vehicle_dimensions || source.ai?.vehicle_dimensions || {});
+  const length = Number(rawVehicleDimensions.length_mm);
+  const width = Number(rawVehicleDimensions.width_mm);
+  const height = Number(rawVehicleDimensions.height_mm || 1400);
+  if (!length || !width) return null;
+
+  const contour_mm = [
+    { x: -length / 2, y: -width / 2 },
+    { x: length / 2, y: -width / 2 },
+    { x: length / 2, y: width / 2 },
+    { x: -length / 2, y: width / 2 },
+  ];
+  const dims = [
+    { label: '車長', value_mm: length },
+    { label: '車寬', value_mm: width },
+  ];
+  if (rawVehicleDimensions.height_mm) dims.push({ label: '車高', value_mm: Number(rawVehicleDimensions.height_mm) });
+  if (rawVehicleDimensions.wheelbase_mm) dims.push({ label: '軸距', value_mm: Number(rawVehicleDimensions.wheelbase_mm) });
+  return { contour_mm, thickness_mm: height, dims };
+}
+
 function showAnalysisLoading(): void {
   analysisResults.innerHTML = `
     <div class="results-panel">
@@ -867,7 +895,10 @@ function setupAiResultsPanelEvents(): void {
     const card = checkbox.closest('.ai-result-card') as HTMLElement;
     const key = card?.dataset.key;
     const item = confirmedItems.find(i => i.key === key);
-    if (item) item.confirmed = checkbox.checked;
+    if (item) {
+      item.confirmed = checkbox.checked;
+      showNextSteps();
+    }
   });
 
   aiResultsPanel.addEventListener('click', (e) => {
@@ -891,6 +922,7 @@ function setupAiResultsPanelEvents(): void {
       const newVal = input.value.trim();
       if (newVal) item.value = newVal;
       renderAiResultsPanel();
+      showNextSteps();
     };
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') input.blur(); });
@@ -971,8 +1003,9 @@ function showNextSteps(): void {
   nextSteps.style.display = 'flex';
   // Enable/disable based on state
   const hasContour = (store.getActivePhoto()?.drawings?.length || 0) > 0;
+  const hasVehiclePreview = Boolean(getVehiclePreviewData());
   const hasAnalysis = lastAnalysisRaw != null;
-  previewCadBtn.disabled = !hasContour;
+  previewCadBtn.disabled = !(hasContour || hasVehiclePreview);
   genFeatureScriptBtn.disabled = !hasAnalysis;
 }
 
@@ -1137,20 +1170,20 @@ function setupEvents(): void {
 
   previewCadBtn.addEventListener('click', async () => {
     const photo = store.getActivePhoto();
-    if (!photo?.drawings?.length) { alert('無繪圖資料'); return; }
+    const vehiclePreview = getVehiclePreviewData();
+    if (!photo?.drawings?.length && !vehiclePreview) { alert('無繪圖資料'); return; }
 
     // Get contour in mm
     const contour = photo.drawings.find(d => d.type === 'polyline' && d.closed && !d.id.startsWith('roi_'));
-    if (!contour) { alert(`找不到輪廓。drawings: ${photo.drawings.map(d => d.id).join(', ')}`); return; }
+    if (!contour && !vehiclePreview) { alert(`找不到輪廓。drawings: ${photo.drawings.map(d => d.id).join(', ')}`); return; }
 
     const scale = photo.scale?.px_per_mm || 1;
     const pts = (contour as any).points_px as {x:number;y:number}[] || [];
-    if (pts.length < 3) { alert(`輪廓點數不足: ${pts.length}`); return; }
+    if (contour && pts.length < 3 && !vehiclePreview) { alert(`輪廓點數不足: ${pts.length}`); return; }
 
-    const contour_mm = pts.map((p) => ({
-      x: p.x / scale,
-      y: p.y / scale,
-    }));
+    const contour_mm = contour
+      ? pts.map((p) => ({ x: p.x / scale, y: p.y / scale }))
+      : vehiclePreview!.contour_mm;
 
     // Get features (holes) — HoleTool stores center/radius inside f.shape
     const features = (photo.features || [])
@@ -1170,16 +1203,18 @@ function setupEvents(): void {
     const thicknessReading = confirmed.caliper_readings?.find((r: any) =>
       r.location?.includes('厚') || r.location?.includes('thick')
     );
-    const thickness_mm = thicknessReading?.value_mm || 5;
+    const thickness_mm = contour ? (thicknessReading?.value_mm || 5) : vehiclePreview!.thickness_mm;
 
     // Build dimensions for overlay
     const dims: { label: string; value_mm: number }[] = [];
-    if (contour_mm.length > 0) {
+    if (contour && contour_mm.length > 0) {
       const xs = contour_mm.map((p: any) => p.x);
       const ys = contour_mm.map((p: any) => p.y);
       dims.push({ label: '寬', value_mm: Math.max(...xs) - Math.min(...xs) });
       dims.push({ label: '高', value_mm: Math.max(...ys) - Math.min(...ys) });
       dims.push({ label: '厚', value_mm: thickness_mm });
+    } else if (vehiclePreview) {
+      dims.push(...vehiclePreview.dims);
     }
 
     // Cleanup previous preview
