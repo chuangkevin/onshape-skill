@@ -2,11 +2,11 @@ import { resolve } from 'path';
 import type { Response } from 'express';
 import { getDb } from '../db.js';
 import { extractOCRReadings } from './ocr.js';
-import { extractLabels, searchOfficialSpecs } from './search.js';
+import { extractLabels, identifyVehicleFromImages, searchOfficialSpecs, searchVehicleDimensionsPartial } from './search.js';
 import { detectEdges, deriveROI } from './opencv.js';
 import { fuseMeasurements } from './fusion.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
-import type { AnalysisResults, LabelInfo } from '@shared/types.js';
+import type { AnalysisResults, LabelInfo, PartialVehicleDimensions, VehicleIdentification } from '@shared/types.js';
 
 type StepId = 'ocr' | 'labels' | 'opencv' | 'search' | 'fusion';
 type StepStatus = 'running' | 'done' | 'error';
@@ -123,6 +123,19 @@ export async function runAnalysisStream(res: Response, projectId: number): Promi
       sendStep(res, 'search', 'error', { error: err.message });
     }
 
+    // Vehicle identification + dimensions (best-effort, non-fatal)
+    let vehicle: VehicleIdentification | undefined;
+    let vehicle_dimensions: PartialVehicleDimensions | undefined;
+    try {
+      const vehicleResult = await identifyVehicleFromImages(imagePaths, projectId);
+      if (vehicleResult.found) {
+        vehicle = vehicleResult;
+        vehicle_dimensions = await searchVehicleDimensionsPartial(vehicleResult, projectId);
+      }
+    } catch (err: any) {
+      console.warn('[analyzeStream] Vehicle lookup skipped:', err.message);
+    }
+
     // === Sequential: fusion waits for all ===
     sendStep(res, 'fusion', 'running');
     try {
@@ -131,6 +144,8 @@ export async function runAnalysisStream(res: Response, projectId: number): Promi
         label_info: labelInfo,
         official_specs: officialSpecs,
         overlay_interpretation: undefined,
+        vehicle,
+        vehicle_dimensions,
       };
 
       const project: any = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);

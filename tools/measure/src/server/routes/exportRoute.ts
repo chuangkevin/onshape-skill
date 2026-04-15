@@ -18,11 +18,24 @@ router.post('/:id/export', (req, res) => {
 
   // Get latest analysis results
   const latestResult: any = db.prepare(
-    'SELECT parsed_data FROM analysis_results WHERE project_id = ? ORDER BY created_at DESC LIMIT 1'
+    'SELECT parsed_data, raw_response FROM analysis_results WHERE project_id = ? ORDER BY created_at DESC LIMIT 1'
   ).get(req.params.id);
 
   const aiResults = latestResult
-    ? JSON.parse(latestResult.parsed_data)
+    ? {
+        ...(JSON.parse(latestResult.parsed_data || '{}')),
+        ...(latestResult.raw_response ? (() => {
+          try {
+            const raw = JSON.parse(latestResult.raw_response);
+            return {
+              vehicle: raw.vehicle ?? raw.ai?.vehicle,
+              vehicle_dimensions: raw.vehicle_dimensions ?? raw.ai?.vehicle_dimensions,
+            };
+          } catch {
+            return {};
+          }
+        })() : {}),
+      }
     : { ocr_readings: [] };
 
   // Use frontend store data if provided, otherwise fall back to DB
@@ -100,6 +113,8 @@ router.post('/:id/export', (req, res) => {
 
   const output = {
     ...measurement,
+    vehicle: aiResults.vehicle,
+    vehicle_dimensions: aiResults.vehicle_dimensions,
     _meta: {
       project_id: project.id,
       photo_count: photoMeasurements.length,

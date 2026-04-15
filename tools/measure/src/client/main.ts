@@ -789,6 +789,8 @@ function showAnalysisLoading(): void {
 function buildConfirmedItems(result: any): ConfirmedItem[] {
   const items: ConfirmedItem[] = [];
   const ai = result.result?.ai;
+  const vehicle = result.result?.vehicle || ai?.vehicle;
+  const vehicleDimensions = result.result?.vehicle_dimensions || ai?.vehicle_dimensions;
 
   if (ai?.label_info?.model_number) {
     items.push({ key: 'model_number', label: '型號', value: ai.label_info.model_number, confirmed: true, group: '基本資訊' });
@@ -796,9 +798,29 @@ function buildConfirmedItems(result: any): ConfirmedItem[] {
   if (ai?.label_info?.manufacturer) {
     items.push({ key: 'manufacturer', label: '製造商', value: ai.label_info.manufacturer, confirmed: true, group: '基本資訊' });
   }
+  if (!ai?.label_info?.model_number && vehicle?.model) {
+    items.push({ key: 'vehicle_model', label: '車型', value: vehicle.model, confirmed: true, group: '車輛識別' });
+  }
+  if (!ai?.label_info?.manufacturer && vehicle?.make) {
+    items.push({ key: 'vehicle_make', label: '車廠', value: vehicle.make, confirmed: true, group: '車輛識別' });
+  }
+  if (vehicle?.year) {
+    items.push({ key: 'vehicle_year', label: '年份', value: String(vehicle.year), confirmed: true, group: '車輛識別' });
+  }
+  if (vehicle?.variant) {
+    items.push({ key: 'vehicle_variant', label: '車型版本', value: vehicle.variant, confirmed: true, group: '車輛識別' });
+  }
+  if (vehicle?.view_angle) {
+    items.push({ key: 'vehicle_view_angle', label: '視角', value: vehicle.view_angle, confirmed: true, group: '車輛識別' });
+  }
   if (ai?.official_specs) {
     for (const [k, v] of Object.entries(ai.official_specs)) {
       items.push({ key: `spec_${k}`, label: k, value: `${v}`, confirmed: true, group: '官方規格 (mm)' });
+    }
+  }
+  if (vehicleDimensions) {
+    for (const [k, v] of Object.entries(vehicleDimensions)) {
+      if (v != null) items.push({ key: `vehicle_dim_${k}`, label: k, value: `${v}`, confirmed: true, group: '車輛尺寸 (mm)' });
     }
   }
   if (ai?.ocr_readings?.length > 0) {
@@ -881,6 +903,25 @@ function getConfirmedExportData(): Record<string, any> {
     if (!item.confirmed) continue;
     if (item.key === 'model_number') data.model_number = item.value;
     else if (item.key === 'manufacturer') data.manufacturer = item.value;
+    else if (item.key === 'vehicle_model') {
+      if (!data.vehicle) data.vehicle = {};
+      data.vehicle.model = item.value;
+    } else if (item.key === 'vehicle_make') {
+      if (!data.vehicle) data.vehicle = {};
+      data.vehicle.make = item.value;
+    } else if (item.key === 'vehicle_year') {
+      if (!data.vehicle) data.vehicle = {};
+      data.vehicle.year = parseInt(item.value, 10) || item.value;
+    } else if (item.key === 'vehicle_variant') {
+      if (!data.vehicle) data.vehicle = {};
+      data.vehicle.variant = item.value;
+    } else if (item.key === 'vehicle_view_angle') {
+      if (!data.vehicle) data.vehicle = {};
+      data.vehicle.view_angle = item.value;
+    } else if (item.key.startsWith('vehicle_dim_')) {
+      if (!data.vehicle_dimensions) data.vehicle_dimensions = {};
+      data.vehicle_dimensions[item.label] = parseFloat(item.value) || item.value;
+    }
     else if (item.key.startsWith('spec_')) {
       if (!data.official_specs) data.official_specs = {};
       data.official_specs[item.label] = parseFloat(item.value) || item.value;
@@ -897,13 +938,18 @@ function showAnalysisResult(result: any): void {
   lastAnalysisRaw = result;
   const ai = result.result?.ai;
   const opencv = result.result?.opencv;
+  const vehicle = result.result?.vehicle || ai?.vehicle;
+  const vehicleDimensions = result.result?.vehicle_dimensions || ai?.vehicle_dimensions;
 
   // Summary in analysisResults
   let html = '<div class="results-panel"><h4>分析完成</h4>';
   const ocrCount = ai?.ocr_readings?.length || 0;
-  const specCount = ai?.official_specs ? Object.keys(ai.official_specs).length : 0;
-  const model = ai?.label_info?.model_number || '未偵測';
+  const specCount = (ai?.official_specs ? Object.keys(ai.official_specs).length : 0) + (vehicleDimensions ? Object.keys(vehicleDimensions).length : 0);
+  const model = ai?.label_info?.model_number || [vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.variant].filter(Boolean).join(' ') || '未偵測';
   html += `<div class="result-item"><span class="result-label">型號：</span><span class="result-value">${model}</span></div>`;
+  if (vehicle?.make || vehicle?.model) {
+    html += `<div class="result-item"><span class="result-label">車型識別：</span><span class="result-value">${[vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.variant].filter(Boolean).join(' ')}</span></div>`;
+  }
   html += `<div class="result-item"><span class="result-label">卡尺讀數：</span><span class="result-value">${ocrCount} 項</span></div>`;
   html += `<div class="result-item"><span class="result-label">官方規格：</span><span class="result-value">${specCount} 項</span></div>`;
   if (opencv) {
@@ -1051,8 +1097,19 @@ function setupEvents(): void {
     const result = await api.exportMeasurement(state.projectId, undefined, state.photos);
     // Merge confirmed AI results
     const confirmed = getConfirmedExportData();
+    const vehicleItems = confirmedItems.filter((item) => item.key.startsWith('vehicle_'));
+    const confirmedVehicleItems = vehicleItems.filter((item) => item.confirmed);
     if (confirmed.model_number) result.model_number = confirmed.model_number;
     if (confirmed.manufacturer) result.manufacturer = confirmed.manufacturer;
+    if (vehicleItems.length > 0 && confirmedVehicleItems.length === 0) {
+      delete result.vehicle;
+      delete result.vehicle_dimensions;
+    } else {
+      if (vehicleItems.length > 0) {
+        result.vehicle = confirmed.vehicle;
+        result.vehicle_dimensions = confirmed.vehicle_dimensions;
+      }
+    }
     if (confirmed.official_specs) result.official_specs = { ...result.official_specs, ...confirmed.official_specs };
     if (confirmed.caliper_readings) result.caliper_readings = confirmed.caliper_readings;
     return result;

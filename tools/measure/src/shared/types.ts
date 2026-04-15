@@ -141,6 +141,8 @@ export interface AnalysisResults {
   label_info?: LabelInfo;
   official_specs?: OfficialSpec;
   overlay_interpretation?: OverlayInterpretation;
+  vehicle?: VehicleIdentification;
+  vehicle_dimensions?: PartialVehicleDimensions;
 }
 
 // ── Measurement fusion output ──

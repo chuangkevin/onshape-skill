@@ -1,18 +1,18 @@
 import { resolve } from 'path';
 import { getDb } from '../db.js';
 import { extractOCRReadings } from './ocr.js';
-import { extractLabels, searchOfficialSpecs, identifyVehicle, searchVehicleDimensions } from './search.js';
+import { extractLabels, searchOfficialSpecs, identifyVehicleFromImages, searchVehicleDimensionsPartial } from './search.js';
 import { detectEdges, deriveROI } from './opencv.js';
 import { evaluateQuality } from './qualityGate.js';
 import { UPLOAD_DIR } from '../routes/photos.js';
-import type { AnalysisResults, OpenCVResult, QualityReport, VehicleIdentification, VehicleDimensions } from '@shared/types.js';
+import type { AnalysisResults, OpenCVResult, PartialVehicleDimensions, QualityReport, VehicleIdentification } from '@shared/types.js';
 
 export interface FullAnalysisResult {
   ai: AnalysisResults;
   opencv: OpenCVResult[];
   quality: QualityReport;
   vehicle?: VehicleIdentification;
-  vehicle_dimensions?: VehicleDimensions;
+  vehicle_dimensions?: PartialVehicleDimensions;
 }
 
 /** Run full parallel analysis pipeline for a project */
@@ -73,14 +73,14 @@ export async function runAnalysisPipeline(projectId: number): Promise<FullAnalys
   }
 
   // Task 5: Vehicle identification + dimension lookup (v0.7.0)
-  // Runs on the first image; skipped if identification fails or throws.
+  // Runs across sampled project images; keeps partial official vehicle dimensions when available.
   let vehicle: VehicleIdentification | undefined;
-  let vehicle_dimensions: VehicleDimensions | undefined;
+  let vehicle_dimensions: PartialVehicleDimensions | undefined;
   try {
-    const vehicleResult = await identifyVehicle(imagePaths[0], projectId);
+    const vehicleResult = await identifyVehicleFromImages(imagePaths, projectId);
     if (vehicleResult.found) {
       vehicle = vehicleResult as VehicleIdentification;
-      vehicle_dimensions = await searchVehicleDimensions(vehicle, projectId);
+      vehicle_dimensions = await searchVehicleDimensionsPartial(vehicle, projectId);
       console.log(`[analyze] Vehicle identified: ${vehicle.make} ${vehicle.model}, dims: ${JSON.stringify(vehicle_dimensions)}`);
     }
   } catch (e: any) {
@@ -93,6 +93,8 @@ export async function runAnalysisPipeline(projectId: number): Promise<FullAnalys
     label_info: labelInfo,
     official_specs: officialSpecs,
     overlay_interpretation: undefined, // Set separately if overlay exists
+    vehicle,
+    vehicle_dimensions,
   };
 
   // Evaluate pipeline quality
@@ -108,7 +110,7 @@ export async function runAnalysisPipeline(projectId: number): Promise<FullAnalys
   `).run(
     projectId,
     JSON.stringify({ ai: aiResults, opencv: opencvResults, quality, vehicle, vehicle_dimensions }),
-    JSON.stringify(aiResults),
+    JSON.stringify({ ...aiResults, vehicle, vehicle_dimensions }),
   );
 
   return { ai: aiResults, opencv: opencvResults, quality, vehicle, vehicle_dimensions };
