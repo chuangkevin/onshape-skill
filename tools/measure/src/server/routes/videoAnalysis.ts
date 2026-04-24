@@ -28,6 +28,7 @@ import {
   buildAnalysisResult,
 } from '../services/objectRecognition.js';
 import { identifyVehicle, sampleVehicleImages, searchVehicleDimensionsPartial } from '../services/search.js';
+import { measureVehicleFromFrames } from '../services/vehicleMeasurement.js';
 import type { ExtractedFeature, ObjectIdentification, PartialVehicleDimensions, VehicleIdentification, VideoJob, VideoAnalysisResult, VideoAnalysisSSEEvent } from '../../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -498,6 +499,35 @@ router.get('/', (_req: Request, res: Response) => {
   res.json(jobs);
 });
 
+// ── PATCH /api/video/:jobId/confirm ──────────────────────────────────────────
+
+router.patch('/:jobId/confirm', (req: Request, res: Response) => {
+  const jobId = String(req.params.jobId);
+  const job = getJob(jobId);
+  if (!job) {
+    res.status(404).json({ error: 'Job not found' });
+    return;
+  }
+
+  const updatedResult = req.body as VideoAnalysisResult;
+  if (!updatedResult || !updatedResult.object || !updatedResult.features) {
+    res.status(400).json({ error: 'Invalid result data' });
+    return;
+  }
+
+  // Save user-confirmed result
+  const checkpoints: VideoCheckpointState = {
+    featureExtractionComplete: true,
+    vehicleDimensionSearchComplete: Boolean(updatedResult.vehicle_dimensions),
+  };
+  updateJob(jobId, {
+    features_json: serializeVideoCheckpoint(updatedResult, checkpoints),
+    status: 'done',
+  });
+
+  res.json({ message: 'Result confirmed and saved' });
+});
+
 // ── DELETE /api/video/:jobId ──────────────────────────────────────────────────
 
 router.delete('/:jobId', (req: Request, res: Response) => {
@@ -683,34 +713,66 @@ async function runAnalysis(job: VideoJob): Promise<void> {
     }
 
     if (needsVehicleDimensionSearch) {
-      const vehicleDimensionSteps: RunnableStep<unknown>[] = [
+      // Try video measurement first (more accurate if reference objects are present)
+      const vehicleMeasurementSteps: RunnableStep<unknown>[] = [
         {
-          id: 'search-vehicle-dimensions-core',
-          name: 'search-vehicle-dimensions-core',
+          id: 'measure-vehicle-from-frames',
+          name: 'measure-vehicle-from-frames',
           allowSharedFallback: true,
-          run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey, ['length_mm', 'width_mm', 'height_mm', 'wheelbase_mm']),
-        },
-        {
-          id: 'search-vehicle-dimensions-track',
-          name: 'search-vehicle-dimensions-track',
-          allowSharedFallback: true,
-          run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey, ['front_track_mm', 'rear_track_mm']),
+          run: (apiKey) => measureVehicleFromFrames(framePaths, vehicleResult as VehicleIdentification, apiKey),
         },
       ];
-      await runPlannedGeminiSteps(vehicleDimensionSteps, async (value) => {
-        vehicleDimensions = mergeVehicleDimensions(partialVehicleDimensions, value as PartialVehicleDimensions | undefined);
-        partialVehicleDimensions = vehicleDimensions;
-        writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
-          featureExtractionComplete,
-          vehicleDimensionSearchComplete,
-        });
+
+      let videoMeasuredDims: PartialVehicleDimensions | undefined;
+      await runPlannedGeminiSteps(vehicleMeasurementSteps, async (value) => {
+        videoMeasuredDims = value as PartialVehicleDimensions | null ?? undefined;
+        if (videoMeasuredDims && Object.keys(videoMeasuredDims).length > 0) {
+          vehicleDimensions = mergeVehicleDimensions(partialVehicleDimensions, videoMeasuredDims);
+          partialVehicleDimensions = vehicleDimensions;
+          writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+            featureExtractionComplete,
+            vehicleDimensionSearchComplete,
+          });
+        }
       }, {
-        parallel: true,
-        softErrorStepIds: vehicleDimensionSteps.map((step) => step.id),
+        softErrorStepIds: ['measure-vehicle-from-frames'],
         onSoftError: async (error) => {
-          console.warn(`[video] Vehicle dimension lookup skipped after retries: ${error instanceof Error ? error.message : String(error)}`);
+          console.warn(`[video] Video measurement failed, will fall back to web search: ${error instanceof Error ? error.message : String(error)}`);
         },
       });
+
+      // Web search for any missing dimensions
+      const stillMissingDims = !hasCompleteVehicleDimensions(vehicleDimensions);
+      if (stillMissingDims) {
+        const vehicleDimensionSteps: RunnableStep<unknown>[] = [
+          {
+            id: 'search-vehicle-dimensions-core',
+            name: 'search-vehicle-dimensions-core',
+            allowSharedFallback: true,
+            run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey, ['length_mm', 'width_mm', 'height_mm', 'wheelbase_mm']),
+          },
+          {
+            id: 'search-vehicle-dimensions-track',
+            name: 'search-vehicle-dimensions-track',
+            allowSharedFallback: true,
+            run: (apiKey) => searchVehicleDimensionsPartial(vehicleResult as VehicleIdentification, undefined, undefined, apiKey, ['front_track_mm', 'rear_track_mm']),
+          },
+        ];
+        await runPlannedGeminiSteps(vehicleDimensionSteps, async (value) => {
+          vehicleDimensions = mergeVehicleDimensions(partialVehicleDimensions, value as PartialVehicleDimensions | undefined);
+          partialVehicleDimensions = vehicleDimensions;
+          writePartialSnapshot(jobId, partialObject, partialFeatures, partialVehicle, partialVehicleDimensions, {
+            featureExtractionComplete,
+            vehicleDimensionSearchComplete,
+          });
+        }, {
+          parallel: true,
+          softErrorStepIds: vehicleDimensionSteps.map((step) => step.id),
+          onSoftError: async (error) => {
+            console.warn(`[video] Vehicle dimension lookup skipped after retries: ${error instanceof Error ? error.message : String(error)}`);
+          },
+        });
+      }
     }
 
     if (needsFeatureSearch) {

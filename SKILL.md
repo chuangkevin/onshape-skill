@@ -1,8 +1,8 @@
 ---
 name: onshape-cad
-description: Generate Onshape FeatureScript code for CAD modeling. Use this when user wants to create 3D models, CAD parts, or mechanical components for Onshape Feature Studio.
-argument-hint: [image-path or description]
-allowed-tools: Read, Glob, Grep, Write, Bash
+description: Generate Onshape FeatureScript code for CAD modeling from photos, videos, or descriptions. Supports vehicle video analysis with automated dimension measurement and interactive confirmation.
+argument-hint: [image-path, video-path, or description]
+allowed-tools: Read, Glob, Grep, Write, Bash, WebSearch, WebFetch
 ---
 
 # Onshape FeatureScript Code Generator
@@ -11,8 +11,77 @@ You are an expert in generating **Onshape FeatureScript** code for Feature Studi
 
 ## Input Processing
 
-1. **If given an image path**: Follow the **Reference Photo Analysis** procedure below
-2. **If given a description**: Parse the requirements and create appropriate 3D geometry
+1. **If given a video path or vehicle photos**: Follow the **Vehicle Photo-to-CAD Workflow** below
+2. **If given product/component images**: Follow the **Reference Photo Analysis** procedure
+3. **If given a description**: Parse the requirements and create appropriate 3D geometry
+
+## Vehicle Photo-to-CAD Workflow (NEW)
+
+When user provides vehicle photos or video (e.g., `car_*.jpg`, `vehicle.mp4`):
+
+### Phase 1: Measure — Photo Analysis
+1. **Use Glob** to find all vehicle photos: `*.jpg`, `*.png`, `*.webp`
+2. **Identify Product**:
+   - Vehicle type (car, SUV, truck, motorcycle, bus)
+   - Make, model, year, variant (if visible in photos or user provides)
+   - Part count estimate
+3. **Scale Calibration**:
+   - Detect reference objects (license plates, people, parking spaces)
+   - Extract px/mm ratio from reference dimensions
+   - **Standard reference sizes**:
+     - License plate (EU): 520×110 mm
+     - License plate (US): 305×152 mm
+     - Adult male: ~1750 mm height
+4. **Shape Characterization**:
+   - Front/side/rear view identification
+   - Body outline extraction
+   - Window positions
+   - Wheel positions and diameter
+5. **Multi-view Synthesis**:
+   - Combine measurements from different angles
+   - Cross-validate dimensions
+
+### Phase 2: Research — Web Search for Official Specs
+1. **WebSearch** for manufacturer specifications:
+   - Query: `"{year} {make} {model} {variant} specifications dimensions mm"`
+   - Extract: length, width, height, wheelbase, track width
+2. **Search for Reference Images**:
+   - Query: `"{make} {model} 3D model CAD drawing side view"`
+3. **Integration Rule**: **Official specs override photo measurements when available**
+
+### Phase 3: Interactive Confirmation — User Verification
+Present detected data to user for confirmation/correction:
+
+```markdown
+# Vehicle Identified: 2023 Lamborghini Urus S
+
+## Overall Dimensions (Confidence: High)
+- Length: 5112 mm  (source: web search)
+- Width: 2016 mm   (source: web search)
+- Height: 1638 mm  (source: photo measurement)
+- Wheelbase: 3003 mm (source: web search)
+
+## Features Detected
+- Front headlights: 2x circular (80mm diameter)
+- Side windows: 4x rectangular
+- Wheel diameter: 700mm (measured from photo)
+
+**Proceed with these values? [y/n]**
+```
+
+If user corrects any value, use the corrected data.
+
+### Phase 4: Generate — FeatureScript Output
+Generate parametric vehicle model with:
+- **Body**: Lower section (58% height) + Cabin/roof (42% height)
+- **Hood curve**: Subtle front curve using `skPolyline`
+- **Windows**: Windshield + side windows (extrude cuts)
+- **Lights**: Front headlights + rear taillights (cylinders)
+- **Wheels**: 4 cylinder placeholders at correct wheelbase positions
+
+**Key Parameters**:
+- `Length`, `Width`, `Height`, `Wheelbase`, `Wheel Diameter` (all adjustable)
+- Use Chinese parameter names for display: `車長`, `車寬`, `車高`, `軸距`, `輪徑`
 
 ## Reference Photo Analysis
 

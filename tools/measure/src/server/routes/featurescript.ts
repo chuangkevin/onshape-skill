@@ -74,31 +74,43 @@ annotation { "Feature Type Name" : "${params.name}" }
 export const vehicleConcept = defineFeature(function(context is Context, id is Id, definition is map)
     precondition
     {
-        annotation { "Name" : "Length" }
+        annotation { "Name" : "車長 (Length)" }
         isLength(definition.length, { (millimeter) : [1000, ${params.lengthMm}, 10000] } as LengthBoundSpec);
 
-        annotation { "Name" : "Width" }
+        annotation { "Name" : "車寬 (Width)" }
         isLength(definition.width, { (millimeter) : [800, ${params.widthMm}, 4000] } as LengthBoundSpec);
 
-        annotation { "Name" : "Height" }
+        annotation { "Name" : "車高 (Height)" }
         isLength(definition.height, { (millimeter) : [800, ${params.heightMm}, 4000] } as LengthBoundSpec);
 
-        annotation { "Name" : "Wheelbase" }
+        annotation { "Name" : "軸距 (Wheelbase)" }
         isLength(definition.wheelbase, { (millimeter) : [1000, ${params.wheelbaseMm}, 7000] } as LengthBoundSpec);
 
-        annotation { "Name" : "Wheel Diameter" }
+        annotation { "Name" : "輪徑 (Wheel Diameter)" }
         isLength(definition.wheelDiameter, { (millimeter) : [300, ${params.wheelDiameterMm}, 1500] } as LengthBoundSpec);
     }
     {
-        // Simplified concept vehicle generated from video analysis.
-        // The body is intentionally blocky/parametric so the user can refine it in Onshape.
+        // ── Body lower section (chassis + engine compartment + passenger area) ──
         var bodySketch = newSketchOnPlane(context, id + "bodySketch", {
             "sketchPlane" : plane(vector(0, 0, 0) * meter, vector(0, 0, 1))
         });
 
-        skRectangle(bodySketch, "body", {
-            "firstCorner" : vector(-definition.length / 2, -definition.width / 2),
-            "secondCorner" : vector(definition.length / 2, definition.width / 2)
+        // Main body outline with subtle hood curve
+        var bodyLength = definition.length;
+        var bodyWidth = definition.width;
+        var frontCurveDepth = bodyLength * 0.05;
+
+        skPolyline(bodySketch, "bodyOutline", {
+            "points" : [
+                vector(-bodyLength / 2, -bodyWidth / 2),
+                vector(-bodyLength / 2 + frontCurveDepth, -bodyWidth / 2),
+                vector(-bodyLength / 2 + frontCurveDepth * 2.2, 0 * millimeter),
+                vector(-bodyLength / 2 + frontCurveDepth, bodyWidth / 2),
+                vector(-bodyLength / 2, bodyWidth / 2),
+                vector(bodyLength / 2, bodyWidth / 2),
+                vector(bodyLength / 2, -bodyWidth / 2),
+                vector(-bodyLength / 2, -bodyWidth / 2)
+            ]
         });
         skSolve(bodySketch);
 
@@ -109,13 +121,19 @@ export const vehicleConcept = defineFeature(function(context is Context, id is I
             "endDepth" : definition.height * ${bodyHeightRatio}
         });
 
+        // ── Cabin / Roof section ──
+        var cabinHeight = definition.height * ${bodyHeightRatio};
         var roofSketch = newSketchOnPlane(context, id + "roofSketch", {
-            "sketchPlane" : plane(vector(0, 0, 1) * (definition.height * ${bodyHeightRatio}), vector(0, 0, 1))
+            "sketchPlane" : plane(vector(0, 0, 1) * cabinHeight, vector(0, 0, 1))
         });
 
+        var roofLength = bodyLength * ${cabinLengthRatio};
+        var roofWidth = bodyWidth * ${cabinWidthRatio};
+        var roofOffset = bodyLength * ${roofFrontOffsetRatio};
+
         skRectangle(roofSketch, "roof", {
-            "firstCorner" : vector(-(definition.length * ${cabinLengthRatio}) / 2 + definition.length * ${roofFrontOffsetRatio}, -(definition.width * ${cabinWidthRatio}) / 2),
-            "secondCorner" : vector((definition.length * ${cabinLengthRatio}) / 2 + definition.length * ${roofFrontOffsetRatio}, (definition.width * ${cabinWidthRatio}) / 2)
+            "firstCorner" : vector(-roofLength / 2 + roofOffset, -roofWidth / 2),
+            "secondCorner" : vector(roofLength / 2 + roofOffset, roofWidth / 2)
         });
         skSolve(roofSketch);
 
@@ -126,31 +144,138 @@ export const vehicleConcept = defineFeature(function(context is Context, id is I
             "endDepth" : definition.height * ${1 - bodyHeightRatio}
         });
 
-        // Reference markers for wheel positions.
-        var axleOffset = definition.wheelbase / 2;
-        var wheelInset = definition.width * ${wheelInsetRatio};
-        var wheelRadius = definition.wheelDiameter / 2;
-        var markerSketch = newSketchOnPlane(context, id + "markerSketch", {
-            "sketchPlane" : plane(vector(0, 0, 0) * meter, vector(0, 0, 1))
+        // ── Windows (side + windshield cutouts) ──
+        var windowHeight = cabinHeight + (definition.height * 0.05);
+        var windowSketch = newSketchOnPlane(context, id + "windowSketch", {
+            "sketchPlane" : plane(vector(0, bodyWidth / 2, 0) * meter, vector(0, 1, 0), vector(1, 0, 0))
         });
 
-        skCircle(markerSketch, "frontLeftWheel", {
-            "center" : vector(-axleOffset, wheelInset),
-            "radius" : wheelRadius
+        // Windshield
+        skRectangle(windowSketch, "windshield", {
+            "firstCorner" : vector(-roofLength / 2 + roofOffset - bodyLength * 0.03, windowHeight),
+            "secondCorner" : vector(-roofLength / 2 + roofOffset + bodyLength * 0.12, definition.height * 0.92)
         });
-        skCircle(markerSketch, "frontRightWheel", {
-            "center" : vector(-axleOffset, -wheelInset),
-            "radius" : wheelRadius
+
+        // Side window
+        skRectangle(windowSketch, "sideWindow", {
+            "firstCorner" : vector(-roofLength / 2 + roofOffset + bodyLength * 0.15, windowHeight),
+            "secondCorner" : vector(roofLength / 2 + roofOffset - bodyLength * 0.08, definition.height * 0.92)
         });
-        skCircle(markerSketch, "rearLeftWheel", {
-            "center" : vector(axleOffset, wheelInset),
-            "radius" : wheelRadius
+        skSolve(windowSketch);
+
+        try {
+            opExtrude(context, id + "windowCutRight", {
+                "entities" : qSketchRegion(id + "windowSketch"),
+                "direction" : vector(0, -1, 0),
+                "endBound" : BoundingType.BLIND,
+                "endDepth" : bodyWidth * 0.04,
+                "operationType" : NewBodyOperationType.REMOVE
+            });
+        }
+
+        // Mirror window cut to left side
+        var windowSketchLeft = newSketchOnPlane(context, id + "windowSketchLeft", {
+            "sketchPlane" : plane(vector(0, -bodyWidth / 2, 0) * meter, vector(0, -1, 0), vector(1, 0, 0))
         });
-        skCircle(markerSketch, "rearRightWheel", {
-            "center" : vector(axleOffset, -wheelInset),
-            "radius" : wheelRadius
+
+        skRectangle(windowSketchLeft, "windshieldL", {
+            "firstCorner" : vector(-roofLength / 2 + roofOffset - bodyLength * 0.03, windowHeight),
+            "secondCorner" : vector(-roofLength / 2 + roofOffset + bodyLength * 0.12, definition.height * 0.92)
         });
-        skSolve(markerSketch);
+
+        skRectangle(windowSketchLeft, "sideWindowL", {
+            "firstCorner" : vector(-roofLength / 2 + roofOffset + bodyLength * 0.15, windowHeight),
+            "secondCorner" : vector(roofLength / 2 + roofOffset - bodyLength * 0.08, definition.height * 0.92)
+        });
+        skSolve(windowSketchLeft);
+
+        try {
+            opExtrude(context, id + "windowCutLeft", {
+                "entities" : qSketchRegion(id + "windowSketchLeft"),
+                "direction" : vector(0, 1, 0),
+                "endBound" : BoundingType.BLIND,
+                "endDepth" : bodyWidth * 0.04,
+                "operationType" : NewBodyOperationType.REMOVE
+            });
+        }
+
+        // ── Headlights (front) ──
+        var headlightZ = definition.height * 0.42;
+        var headlightY = bodyWidth * 0.35;
+        var headlightX = -bodyLength / 2 + bodyLength * 0.06;
+        var headlightRadius = bodyWidth * 0.06;
+
+        try {
+            opCylinder(context, id + "headlightLeft", {
+                "bottomCenter" : vector(headlightX, headlightY, headlightZ),
+                "radius" : headlightRadius,
+                "height" : bodyLength * 0.02,
+                "direction" : vector(-1, 0, 0)
+            });
+
+            opCylinder(context, id + "headlightRight", {
+                "bottomCenter" : vector(headlightX, -headlightY, headlightZ),
+                "radius" : headlightRadius,
+                "height" : bodyLength * 0.02,
+                "direction" : vector(-1, 0, 0)
+            });
+        }
+
+        // ── Taillights (rear) ──
+        var taillightX = bodyLength / 2 - bodyLength * 0.04;
+        var taillightZ = definition.height * 0.38;
+
+        try {
+            opCylinder(context, id + "taillightLeft", {
+                "bottomCenter" : vector(taillightX, headlightY, taillightZ),
+                "radius" : headlightRadius * 0.7,
+                "height" : bodyLength * 0.015,
+                "direction" : vector(1, 0, 0)
+            });
+
+            opCylinder(context, id + "taillightRight", {
+                "bottomCenter" : vector(taillightX, -headlightY, taillightZ),
+                "radius" : headlightRadius * 0.7,
+                "height" : bodyLength * 0.015,
+                "direction" : vector(1, 0, 0)
+            });
+        }
+
+        // ── Wheels (reference cylinders) ──
+        var axleOffset = definition.wheelbase / 2;
+        var wheelInset = bodyWidth * ${wheelInsetRatio};
+        var wheelRadius = definition.wheelDiameter / 2;
+        var wheelThickness = bodyWidth * 0.12;
+
+        try {
+            opCylinder(context, id + "wheelFrontLeft", {
+                "bottomCenter" : vector(-axleOffset, wheelInset, wheelRadius),
+                "radius" : wheelRadius,
+                "height" : wheelThickness,
+                "direction" : vector(0, -1, 0)
+            });
+
+            opCylinder(context, id + "wheelFrontRight", {
+                "bottomCenter" : vector(-axleOffset, -wheelInset, wheelRadius),
+                "radius" : wheelRadius,
+                "height" : wheelThickness,
+                "direction" : vector(0, 1, 0)
+            });
+
+            opCylinder(context, id + "wheelRearLeft", {
+                "bottomCenter" : vector(axleOffset, wheelInset, wheelRadius),
+                "radius" : wheelRadius,
+                "height" : wheelThickness,
+                "direction" : vector(0, -1, 0)
+            });
+
+            opCylinder(context, id + "wheelRearRight", {
+                "bottomCenter" : vector(axleOffset, -wheelInset, wheelRadius),
+                "radius" : wheelRadius,
+                "height" : wheelThickness,
+                "direction" : vector(0, 1, 0)
+            });
+        }
     });`;
 }
 

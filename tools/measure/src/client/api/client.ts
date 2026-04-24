@@ -126,3 +126,9 @@ export const restartVideoAnalysis = (jobId: string) =>
   apiFetch<{ message: string }>(`/api/video/${jobId}/analyze`, {
     method: 'POST',
   });
+
+export const confirmVideoAnalysis = (jobId: string, result: any) =>
+  apiFetch<{ message: string }>(`/api/video/${jobId}/confirm`, {
+    method: 'PATCH',
+    body: JSON.stringify(result),
+  });

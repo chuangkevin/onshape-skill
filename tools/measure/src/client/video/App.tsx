@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react';
 import VideoUploader from './components/VideoUploader';
 import AnalysisProgress from './components/AnalysisProgress';
+import ConfirmationStep from './components/ConfirmationStep';
 import FeatureList from './components/FeatureList';
 import type { VideoAnalysisResult } from '@shared/types';
-import { restartVideoAnalysis } from '../api/client';
+import { restartVideoAnalysis, confirmVideoAnalysis } from '../api/client';
 
-type Step = 'upload' | 'analyzing' | 'done';
+type Step = 'upload' | 'analyzing' | 'confirming' | 'generating' | 'done';
 
 function isAlreadyRunningError(message: string): boolean {
   return /already in status/i.test(message || '');
@@ -27,10 +28,28 @@ export default function App() {
     setStep('analyzing');
   }
 
-  function handleDone(r: VideoAnalysisResult, notice?: string) {
+  function handleAnalysisDone(r: VideoAnalysisResult, notice?: string) {
     setResult(r);
     setAnalysisNotice(notice || null);
-    setStep('done');
+    setStep('confirming');
+  }
+
+  async function handleConfirm(updated: VideoAnalysisResult) {
+    if (!jobId) return;
+    setStep('generating');
+    try {
+      await confirmVideoAnalysis(jobId, updated);
+      setResult(updated);
+      setStep('done');
+    } catch (err: any) {
+      setAnalysisNotice(`確認失敗: ${err?.message || '未知錯誤'}`);
+      setStep('confirming');
+    }
+  }
+
+  function handleBackToAnalysis() {
+    setStep('analyzing');
+    setResult(null);
   }
 
   function handleReset() {
@@ -86,19 +105,33 @@ export default function App() {
       {/* Step indicator */}
       <div className="flex items-center justify-center gap-2 py-4 text-sm" style={{ color: 'var(--text-muted)' }}>
         <StepDot active={step === 'upload'} done={step !== 'upload'} label="1. 上傳" />
-        <div className="h-px w-8" style={{ background: 'var(--border)' }} />
-        <StepDot active={step === 'analyzing'} done={step === 'done'} label="2. AI 分析" />
-        <div className="h-px w-8" style={{ background: 'var(--border)' }} />
-        <StepDot active={step === 'done'} done={false} label="3. 特徵清單" />
+        <div className="h-px w-6" style={{ background: 'var(--border)' }} />
+        <StepDot active={step === 'analyzing'} done={step === 'confirming' || step === 'generating' || step === 'done'} label="2. AI 分析" />
+        <div className="h-px w-6" style={{ background: 'var(--border)' }} />
+        <StepDot active={step === 'confirming'} done={step === 'generating' || step === 'done'} label="3. 確認資料" />
+        <div className="h-px w-6" style={{ background: 'var(--border)' }} />
+        <StepDot active={step === 'generating'} done={step === 'done'} label="4. 生成程式碼" />
+        <div className="h-px w-6" style={{ background: 'var(--border)' }} />
+        <StepDot active={step === 'done'} done={false} label="5. 完成" />
       </div>
 
       {/* Main content */}
-      <main className="max-w-4xl mx-auto px-4 py-6">
+      <main className="max-w-5xl mx-auto px-4 py-6">
         {step === 'upload' && (
           <VideoUploader onUploaded={handleUploaded} />
         )}
         {step === 'analyzing' && jobId && (
-          <AnalysisProgress jobId={jobId} onDone={handleDone} onReset={handleReset} />
+          <AnalysisProgress jobId={jobId} onDone={handleAnalysisDone} onReset={handleReset} />
+        )}
+        {step === 'confirming' && jobId && result && (
+          <ConfirmationStep jobId={jobId} result={result} onConfirm={handleConfirm} onBack={handleBackToAnalysis} />
+        )}
+        {step === 'generating' && (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
+            <p className="text-lg font-medium">正在生成 FeatureScript...</p>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>使用 Gemini AI 產生精細車輛模型</p>
+          </div>
         )}
         {step === 'done' && result && (
           <FeatureList result={result} onReset={handleReset} onRetry={jobId ? handleRetry : undefined} retrying={retryingAnalysis} notice={analysisNotice} />
