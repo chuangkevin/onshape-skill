@@ -132,3 +132,35 @@ export const confirmVideoAnalysis = (jobId: string, result: any) =>
     method: 'PATCH',
     body: JSON.stringify(result),
   });
+
+// OpenCode Settings
+export interface OpenCodeSettings {
+  servers: string;
+  servers_source: 'db' | 'env' | 'none';
+  text_model: string;
+  text_model_source: 'db' | 'env' | 'default';
+}
+
+export interface OpenCodeModelGroup {
+  provider: string;
+  name: string;
+  authed: boolean;
+  models: Array<{ id: string; name: string; free: boolean }>;
+}
+
+export const getOpenCodeSettings = () =>
+  apiFetch<OpenCodeSettings>('/api/settings/opencode');
+
+export const saveOpenCodeSettings = (data: { servers: string; text_model: string }) =>
+  apiFetch<OpenCodeSettings & { ok: boolean }>('/api/settings/opencode', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const clearOpenCodeSettings = () =>
+  apiFetch<{ ok: boolean }>('/api/settings/opencode', { method: 'DELETE' });
+
+export const getOpenCodeModels = () =>
+  apiFetch<{ groups: OpenCodeModelGroup[]; server: { id: string; label: string; base_url: string } | null }>(
+    '/api/settings/opencode/models',
+  );

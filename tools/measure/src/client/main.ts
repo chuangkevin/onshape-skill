@@ -57,6 +57,16 @@ const settingsClose = document.getElementById('settingsClose') as HTMLButtonElem
 const newKeyInput = document.getElementById('newKeyInput') as HTMLTextAreaElement;
 const addKeyBtn = document.getElementById('addKeyBtn') as HTMLButtonElement;
 const keyList = document.getElementById('keyList') as HTMLDivElement;
+const ocStatus = document.getElementById('ocStatus') as HTMLDListElement;
+const ocStatusServer = document.getElementById('ocStatusServer') as HTMLElement;
+const ocStatusModel = document.getElementById('ocStatusModel') as HTMLElement;
+const ocServersInput = document.getElementById('ocServersInput') as HTMLTextAreaElement;
+const ocModelSearch = document.getElementById('ocModelSearch') as HTMLInputElement;
+const ocRefreshModelsBtn = document.getElementById('ocRefreshModelsBtn') as HTMLButtonElement;
+const ocModelSel = document.getElementById('ocModelSel') as HTMLSelectElement;
+const ocFlash = document.getElementById('ocFlash') as HTMLDivElement;
+const ocSaveBtn = document.getElementById('ocSaveBtn') as HTMLButtonElement;
+const ocClearBtn = document.getElementById('ocClearBtn') as HTMLButtonElement;
 
 // ── Mode & Wizard DOM Elements ──
 const modeSelector = document.getElementById('modeSelector') as HTMLDivElement;
@@ -1724,7 +1734,129 @@ function setupWizardEvents(): void {
   });
 }
 
-// ── Settings ──
+// ── OpenCode Settings ──
+
+const OC_SOURCE_LABEL: Record<string, string> = {
+  db: '設定', env: '環境變數', none: '未設定', default: '預設',
+};
+
+let ocAllGroups: import('./api/client.js').OpenCodeModelGroup[] = [];
+
+function showOcFlash(text: string, kind: 'ok' | 'error'): void {
+  ocFlash.textContent = text;
+  ocFlash.className = `oc-flash ${kind}`;
+  ocFlash.style.display = 'block';
+  if (kind === 'ok') setTimeout(() => { ocFlash.style.display = 'none'; }, 3000);
+}
+
+function renderOcModelOptions(): void {
+  const q = ocModelSearch.value.toLowerCase().trim();
+  const current = ocModelSel.value;
+  const defaultText = ocStatus.style.display !== 'none'
+    ? `— 使用預設（${ocStatusModel.dataset.model || 'opencode/deepseek-v4-flash-free'}）—`
+    : '— 使用預設（opencode/deepseek-v4-flash-free）—';
+
+  ocModelSel.innerHTML = `<option value="">${defaultText}</option>`;
+
+  const groups = q
+    ? ocAllGroups.map(g => ({
+        ...g,
+        models: g.models.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)),
+      })).filter(g => g.models.length > 0)
+    : ocAllGroups;
+
+  for (const g of groups) {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = `${g.name}${g.authed ? '' : ' (需授權)'}`;
+    for (const m of g.models) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.free ? `${m.name} [free]` : m.name;
+      optgroup.appendChild(opt);
+    }
+    ocModelSel.appendChild(optgroup);
+  }
+
+  if (current) ocModelSel.value = current;
+}
+
+async function loadOcSettings(): Promise<void> {
+  try {
+    const s = await api.getOpenCodeSettings();
+    ocServersInput.value = s.servers;
+    if (s.text_model_source === 'db') ocModelSel.value = s.text_model;
+    ocStatusServer.textContent = (s.servers.split('\n')[0] || '—') + ` [${OC_SOURCE_LABEL[s.servers_source]}]`;
+    ocStatusModel.textContent = s.text_model + ` [${OC_SOURCE_LABEL[s.text_model_source]}]`;
+    ocStatusModel.dataset.model = s.text_model;
+    ocStatus.style.display = 'grid';
+    ocClearBtn.disabled = s.servers_source !== 'db';
+  } catch {
+    // ignore
+  }
+}
+
+async function refreshOcModels(): Promise<void> {
+  ocRefreshModelsBtn.disabled = true;
+  ocRefreshModelsBtn.textContent = '載入中...';
+  try {
+    const result = await api.getOpenCodeModels();
+    ocAllGroups = result.groups;
+    renderOcModelOptions();
+    if (result.groups.length === 0) {
+      const count = ocServersInput.value.split('\n').filter(s => s.trim()).length;
+      showOcFlash(`All ${count} OpenCode server(s) failed or returned no models`, 'error');
+    } else {
+      ocFlash.style.display = 'none';
+    }
+  } catch (err: unknown) {
+    showOcFlash('模型載入失敗：' + (err instanceof Error ? err.message : '未知錯誤'), 'error');
+  } finally {
+    ocRefreshModelsBtn.disabled = false;
+    ocRefreshModelsBtn.textContent = '重新整理模型';
+  }
+}
+
+function setupOcSettingsEvents(): void {
+  ocModelSearch.addEventListener('input', renderOcModelOptions);
+
+  ocRefreshModelsBtn.addEventListener('click', () => void refreshOcModels());
+
+  ocSaveBtn.addEventListener('click', async () => {
+    ocSaveBtn.disabled = true;
+    ocSaveBtn.textContent = '儲存中...';
+    try {
+      await api.saveOpenCodeSettings({
+        servers: ocServersInput.value,
+        text_model: ocModelSel.value || '',
+      });
+      showOcFlash('OpenCode 設定已儲存', 'ok');
+      await loadOcSettings();
+    } catch (err: unknown) {
+      showOcFlash('儲存失敗：' + (err instanceof Error ? err.message : '未知錯誤'), 'error');
+    } finally {
+      ocSaveBtn.disabled = false;
+      ocSaveBtn.textContent = '儲存 OpenCode 設定';
+    }
+  });
+
+  ocClearBtn.addEventListener('click', async () => {
+    if (!confirm('確定清除 DB 中的 OpenCode 設定？')) return;
+    ocClearBtn.disabled = true;
+    ocClearBtn.textContent = '清除中...';
+    try {
+      await api.clearOpenCodeSettings();
+      showOcFlash('已清除 DB 設定，回到環境變數備援', 'ok');
+      await loadOcSettings();
+    } catch (err: unknown) {
+      showOcFlash('清除失敗：' + (err instanceof Error ? err.message : '未知錯誤'), 'error');
+    } finally {
+      ocClearBtn.disabled = false;
+      ocClearBtn.textContent = '清除 DB 設定';
+    }
+  });
+}
+
+// ── Gemini Key Settings ──
 async function renderKeyList(): Promise<void> {
   try {
     const keys = await api.listApiKeys();
@@ -1748,12 +1880,14 @@ async function renderKeyList(): Promise<void> {
 
 function openSettings(): void {
   settingsOverlay.classList.remove('hidden');
-  renderKeyList();
+  void renderKeyList();
+  void loadOcSettings();
 }
 
 function setupSettingsEvents(): void {
   settingsBtn.addEventListener('click', openSettings);
   landingSettingsBtn.addEventListener('click', openSettings);
+  setupOcSettingsEvents();
 
   settingsClose.addEventListener('click', () => {
     settingsOverlay.classList.add('hidden');

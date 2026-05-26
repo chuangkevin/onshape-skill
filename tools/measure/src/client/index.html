@@ -166,6 +166,25 @@
     .key-item .key-delete:hover { background:#f8514922; }
     .key-empty { color:#484f58; font-size:13px; text-align:center; padding:16px; }
     .settings-hint { color:#484f58; font-size:12px; margin-top:8px; }
+    .oc-status { display:grid; grid-template-columns:5rem 1fr; gap:2px 8px; margin-bottom:12px; font-size:12px; }
+    .oc-status dt { color:#8b949e; }
+    .oc-status dd { color:#c9d1d9; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .oc-source { color:#484f58; margin-left:4px; }
+    .oc-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+    .oc-search { flex:1; padding:5px 10px; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; font-size:13px; }
+    .oc-search::placeholder { color:#484f58; }
+    .oc-refresh-btn { padding:5px 10px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; font-size:13px; cursor:pointer; white-space:nowrap; }
+    .oc-refresh-btn:hover { background:#30363d; }
+    .oc-select { width:100%; padding:6px 10px; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; font-size:13px; margin-bottom:8px; }
+    .oc-flash { font-size:12px; padding:6px 10px; border-radius:4px; margin-bottom:8px; display:none; }
+    .oc-flash.ok { color:#3fb950; background:#3fb95022; border:1px solid #3fb95044; }
+    .oc-flash.error { color:#f85149; background:#f8514922; border:1px solid #f8514944; }
+    .oc-actions { display:flex; gap:8px; }
+    .oc-save-btn { padding:7px 16px; background:#1f6feb; border:none; color:#fff; border-radius:6px; cursor:pointer; font-size:13px; }
+    .oc-save-btn:hover { background:#388bfd; }
+    .oc-clear-btn { padding:7px 16px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; cursor:pointer; font-size:13px; }
+    .oc-clear-btn:hover { background:#30363d; }
+    button:disabled { opacity:0.4; cursor:not-allowed !important; }
 
     /* AI Results Confirmation Panel */
     .ai-results { background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:12px; margin-top:8px; font-size:13px; }
@@ -593,6 +612,42 @@
             <!-- Dynamic key items -->
           </div>
           <div class="settings-hint">API Key 只顯示末 4 碼，儲存在本地 SQLite 資料庫中，不會上傳。</div>
+        </div>
+
+        <!-- OpenCode AI Section -->
+        <div class="settings-section">
+          <h3>OPENCODE AI</h3>
+
+          <dl class="oc-status" id="ocStatus" style="display:none">
+            <dt>伺服器</dt>
+            <dd id="ocStatusServer">—</dd>
+            <dt>文字模型</dt>
+            <dd id="ocStatusModel">—</dd>
+          </dl>
+
+          <label style="font-size:12px;color:#8b949e;display:block;margin-bottom:4px">OPENCODE 伺服器（一行一個 URL）</label>
+          <textarea
+            id="ocServersInput"
+            rows="3"
+            placeholder="http://opencode-server:4096"
+            style="width:100%;padding:8px 12px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;font-size:13px;font-family:monospace;resize:vertical;min-height:60px;box-sizing:border-box;margin-bottom:8px"
+          ></textarea>
+
+          <div class="oc-row">
+            <input type="text" id="ocModelSearch" class="oc-search" placeholder="搜尋模型（gpt / gemini / ...）" />
+            <button type="button" id="ocRefreshModelsBtn" class="oc-refresh-btn">重新整理模型</button>
+          </div>
+
+          <select id="ocModelSel" class="oc-select">
+            <option value="">— 使用預設（opencode/deepseek-v4-flash-free）—</option>
+          </select>
+
+          <div id="ocFlash" class="oc-flash"></div>
+
+          <div class="oc-actions">
+            <button type="button" id="ocSaveBtn" class="oc-save-btn">儲存 OpenCode 設定</button>
+            <button type="button" id="ocClearBtn" class="oc-clear-btn">清除 DB 設定</button>
+          </div>
         </div>
       </div>
     </div>
