@@ -3,6 +3,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 import { getDb } from './db.js';
+import { initOpenCodeSettingsTable } from './opencode-settings.js';
 import projectsRouter from './routes/projects.js';
 import photosRouter from './routes/photos.js';
 import keysRouter from './routes/keys.js';
@@ -10,6 +11,7 @@ import analyzeRouter from './routes/analyze.js';
 import exportRouter from './routes/exportRoute.js';
 import featurescriptRouter from './routes/featurescript.js';
 import videoRouter from './routes/videoAnalysis.js';
+import opencodeRouter from './routes/opencode.js';
 import { UPLOAD_DIR } from './routes/photos.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -25,6 +27,7 @@ app.use(express.json());
 
 // Initialize database
 getDb();
+initOpenCodeSettingsTable();
 
 // API routes
 app.get('/api/health', (_req, res) => {
@@ -37,6 +40,7 @@ app.use('/api/projects', exportRouter);
 app.use('/api/keys', keysRouter);
 app.use('/api/generate-featurescript', featurescriptRouter);
 app.use('/api/video', videoRouter);
+app.use('/api', opencodeRouter);
 
 // Serve uploaded photos
 app.use('/uploads', express.static(UPLOAD_DIR));
